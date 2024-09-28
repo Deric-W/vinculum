@@ -1,0 +1,60 @@
+name: Build & Test
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+        - stable
+        - beta
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: ${{ matrix.toolchain }}
+        components: rustc, rust-std, cargo, rustfmt, clippy
+        cache: false
+  
+    - name: Setup Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ matrix.toolchain }}
+
+    - name: Lint
+      run: |
+        cargo fmt --all --check
+        cargo clippy -- -D warnings
+
+    - name: Build & Test (without coverage)
+      if: ${{ matrix.toolchain }} != 'stable'
+      run: cargo test --verbose --all-features
+
+    - name: Install Tarpaulin
+      if: ${{ matrix.toolchain }} == 'stable'
+      run: cargo install cargo-tarpaulin --no-default-features
+
+    - name: Build & Test (with coverage)
+      if: ${{ matrix.toolchain }} == 'stable'
+      run: cargo tarpaulin --verbose --all-features --engine llvm --out xml
+
+    - name: Upload coverage
+      if: ${{ matrix.toolchain }} == 'stable'
+      uses: codecov/codecov-action@v4
+      with:
+        flags: ${{ runner.os }}
+        verbose: true
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
