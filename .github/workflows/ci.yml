@@ -8,15 +8,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# two different jobs since if conditions can't access matrix values
 jobs:
-  build_and_test:
-    name: Build & Test
+  test_stable:
+    name: Build & Test (stable)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        toolchain:
-        - stable
-        - beta
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -24,14 +20,52 @@ jobs:
     - name: Setup Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
-        toolchain: ${{ matrix.toolchain }}
+        toolchain: stable
         components: rustc, rust-std, cargo, rustfmt, clippy
         cache: false
   
     - name: Setup Cache
       uses: Swatinem/rust-cache@v2
       with:
-        shared-key: ${{ matrix.toolchain }}
+        shared-key: stable
+
+    - name: Lint
+      run: |
+        cargo fmt --all --check
+        cargo clippy -- -D warnings
+
+    - name: Install Tarpaulin
+      run: cargo install cargo-tarpaulin --no-default-features
+
+    - name: Build & Test (with coverage)
+      run: cargo tarpaulin --verbose --all-features --engine llvm --out xml
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v4
+      with:
+        flags: ${{ runner.os }}
+        verbose: true
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  test_beta:
+    name: Build & Test (beta)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: beta
+        components: rustc, rust-std, cargo, rustfmt, clippy
+        cache: false
+  
+    - name: Setup Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: beta
 
     - name: Lint
       run: |
@@ -39,22 +73,4 @@ jobs:
         cargo clippy -- -D warnings
 
     - name: Build & Test (without coverage)
-      if: ${{ matrix.toolchain }} != 'stable'
       run: cargo test --verbose --all-features
-
-    - name: Install Tarpaulin
-      if: ${{ matrix.toolchain }} == 'stable'
-      run: cargo install cargo-tarpaulin --no-default-features
-
-    - name: Build & Test (with coverage)
-      if: ${{ matrix.toolchain }} == 'stable'
-      run: cargo tarpaulin --verbose --all-features --engine llvm --out xml
-
-    - name: Upload coverage
-      if: ${{ matrix.toolchain }} == 'stable'
-      uses: codecov/codecov-action@v4
-      with:
-        flags: ${{ runner.os }}
-        verbose: true
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
