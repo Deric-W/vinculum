@@ -1,4 +1,4 @@
-name: Publish to crates.io
+name: CD
 on:
   push:
     tags: [ v* ]
