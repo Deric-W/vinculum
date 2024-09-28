@@ -1,0 +1,30 @@
+name: CD
+on:
+  push:
+    tags: [ v* ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        components: rustc, rust-std, cargo
+        cache: false
+  
+    - name: Setup Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: stable
+
+    - name: Publish using Cargo
+      run: cargo publish --verbose --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

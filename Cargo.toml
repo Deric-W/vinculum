@@ -1,0 +1,15 @@
+[package]
+name = "vinculum"
+version = "0.1.0"
+authors = ["Eric Niklas Wolf <robo-eric@gmx.de>"]
+description = "Implementation of Lock-Free Deduplication in Rust"
+readme = "README.md"
+repository = "https://github.com/Deric-W/vinculum"
+license = "LGPL-2.1-only"
+keywords = ["backup", "deduplication"]
+categories = ["database-implementations"]
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["lib"]
