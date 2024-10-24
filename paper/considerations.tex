@@ -1,0 +1,419 @@
+\documentclass[english,utf8,aspectratio=169]{beamer}
+\usetheme{tud}
+\usecolortheme{tud}
+\graphicspath{{./img/}}
+\usepackage[backend = biber,style = numeric]{biblatex}
+\addbibresource{references.bib}
+
+\AtBeginSection[]{\partpage{\usebeamertemplate***{part page}}}
+\setbeamertemplate{theorems}[numbered]
+
+\title{Lock-Free Deduplication}
+\subtitle{Implementation considerations}
+\author{Eric Niklas Wolf}
+\institut{Chair of Distributed and Networked Systems}
+
+\begin{document}
+    \maketitle
+
+    \begin{frame}
+        \frametitle{Outline}
+        \tableofcontents
+    \end{frame}
+
+    \section{Concurrent archive deletions}
+    \begin{frame}
+        \frametitle{Accessing all archives}
+        \begin{itemize}
+            \item Lock-Free Deduplication requires an operation to retrieve all archive
+                files~\cite[Operation `downloadAllManifestFiles']{Duplicacy}
+            \item on backends like POSIX filesystems this operation is split into listing
+                all files and accessing them
+            \item since archive files can be deleted at any time by a concurrently running
+                pruning operation accessing listed files can fail because they are missing
+        \end{itemize}
+        \begin{theorem}
+            \label{theorem:archiveaccess}
+            Archives missing after being listed can be ignored.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            \begin{enumerate}
+                \item Ignoring missing archives is equivalent to them not being listed
+                \item Deleting an archive causes it to not be listed 
+            \end{enumerate}
+            Therefore applying Theorem~\ref{theorem:archiveaccess} to the `downloadAllManifestFiles'
+            operation is equivalent to performing all archive deletions which would have happened
+            during the operation before the operation starts.
+        \end{proof}
+    \end{frame}
+
+    \section{Race condition during chunk accesses}
+    \begin{frame}
+        \frametitle{Accessing a chunk}
+        \begin{block}{Fossil access policy~\cite[Policy 2]{Duplicacy}}
+            \begin{enumerate}
+                \item A restore, list, or check procedure that reads existing backups
+                    can read the fossil if the original chunk cannot be found.
+                \item A backup procedure cannot access any fossils.
+                    That is, it must upload a chunk if it cannot find the chunk,
+                    even if a corresponding fossil exists.
+            \end{enumerate}
+        \end{block}
+        \begin{theorem}
+            The fossil access policy is affected by a race condition which can cause chunks
+            to appear as missing.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:chunk2fossil}
+            It is possible to convert a chunk into a fossil while accessing it.
+        \end{lemma}
+        \begin{proof}
+            A fossil collection can be started which prunes the only archive referencing a chunk
+            and halted after downloading all archive files (for example by a processing or network delay).
+            When the fossil collection is later resumed it will turn the chunk into a fossil,
+            even if in the meantime another archive which references the chunk has been created.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:fossil2chunk}
+            It is possible to recover the fossil of a chunk while accessing it.
+        \end{lemma}
+        \begin{proof}
+            A fossil collection which erroneously creates fossils can be created as shown in
+            Lemma~\ref{lemma:chunk2fossil}, which will cause the following fossil deletion
+            to recover the erroneously created fossils.
+            This may happen while another clients tries to access them.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:chunkparallel}
+            The operations described described by Lemma~\ref{lemma:chunk2fossil} and
+            Lemma~\ref{lemma:fossil2chunk} may be executed in parallel.
+        \end{lemma}
+        \begin{proof}
+            There is a way for multiple clients to create pending fossil deletions as described
+            in Lemma~\ref{lemma:fossil2chunk} which can be performed at will while also
+            allowing fossil collections as described in Lemma~\ref{lemma:chunk2fossil} to happen
+            in parallel.
+            Multiple clients performing fossil collection and deletion in parallel is allowed by
+            the Lock-Free Deduplication algorithm~\cite[Theorem 2]{Duplicacy}.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            \begin{enumerate}
+                \item Some clients perform a fossil collection as described in Lemma~\ref{lemma:fossil2chunk}
+                    in parallel, which leaves the chunk as a fossil to recovered at fossil deletion
+                \item Every client creates an archive, allowing for the fossil deletion to proceed
+                \item Some clients begin a fossil collection as described in Lemma~\ref{lemma:chunk2fossil},
+                    but halt it as described in the lemma
+                \item A new archive referencing the chunk is created, causing a new chunk to be uploaded
+                    as dictated by the fossil access policy~\cite[Policy 2]{Duplicacy}
+            \end{enumerate}
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            With the operations described by Lemma~\ref{lemma:chunk2fossil} and
+            Lemma~\ref{lemma:fossil2chunk} and their parallel execution as shown in
+            Lemma~\ref{lemma:chunkparallel} it is possible to cause the following sequence of events:
+            \begin{enumerate}
+                \item A chunk is turned into a fossil
+                \item A client tries to access the chunk and fails
+                \item The chunk is recovered from its fossil
+                \item The client tries to access the fossil and fails
+            \end{enumerate}
+            From the perspective of the client the chunk is missing from the repository.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        A client may alternate between trying to access a chunk and its fossil, but can this
+        action result in an infinite loop?
+        \begin{theorem}
+            The number of times a chunk can be recovered from its fossil during it being
+            accessed is finite, assuming the accessing client generates a finite amount
+            of new archives while accessing it and only performs a finite amount of fossil
+            deletions at a time.
+        \end{theorem}
+        \begin{corollary}
+            Since this causes the chunk to remain a fossil the client will eventually succeed
+            in accesing it.
+        \end{corollary}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            When the client creates only a finite amount of archives there has to be an archive
+            which is the last archives created during the chunk access by the client.
+            A fossil deletion must make sure Policy 2~\cite{Duplicacy} is satisfied before
+            continuing, preventing it from being performed unless its fossil collection ended
+            before the last archive was created.
+            Since each client only performs a finite amount of fossil deletions at a time
+            there is only a finite amount of fossil deletions which satisfy Policy 2~\cite{Duplicacy},
+            causing the chunk to remain a fossil after all of them have been executed.
+        \end{proof}
+    \end{frame}
+
+    \section{Race condition during fossil collection and deletion}
+    \begin{frame}
+        \frametitle{Race condition during fossil collection and deletion}
+        \begin{theorem}
+            It is possible to delete a chunk while it is still being referenced by an archive
+            when following the Lock-Free Deduplication algorithm.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            Assuming a repository which has 3 clients, one of them being about to perform a
+            fossil deletion after all of them created archives to satisfy Policy 3.
+            After this fossil deletion downloads all archive files to check Policy 3 and determining
+            a certain fossil to be safe to delete the other two clients beform the following actions:
+            \begin{enumerate}
+                \item create an archive which causes the chunk of the fossil to be recreated
+                \item initiate a fossil collection to prune this archive by downloading all archive files
+                \item create another archive which also references the chunk of the first archive
+                \item finish the fossil collection by turning the recreated chunk into a fossil
+            \end{enumerate}
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            Now the second archive references a fossil which would be recovered by the following
+            fossil deletion step.
+            But since the already running fossil deletion step determined the same fossil to be safe
+            to delete it will delete it causing the second archive to reference a not existing chunk.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        \begin{theorem}
+            \label{theorem:uniquefossils}
+            By preventing fossils produced by a fossil collection from being deleted by a fossil
+            deletion not associated with it referenced chunks can't be deleted.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            Assuming a referenced chunk was deleted by a fossil deletion step.
+            This means the chunk was turned into a fossil by the associated fossil collection step,
+            implying all archives referencing it where selected to be pruned.
+            But it being referenced after the fossil deletion step means the creation of a new archive
+            not seen by the fossil collection step referenced the chunk before Policy 2 would have
+            caused it to be recreated, otherwise the recreated chunk would have caused its fossil
+            to be safe to delete.
+            Since such an archive would have caused the check for Policy 3 to fail until it was seen
+            by the fossil deletion step it would have caused the chunk to not be deleted.
+        \end{proof}
+    \end{frame}
+
+    \section{Recovering from a failed archive creation}
+    \begin{frame}
+        \frametitle{Archive creation failure}
+        When creating an archive fails after some chunks where already uploaded to the repository
+        they are not deleted until another archive which references them is created and pruned,
+        which may never happen.
+        \begin{theorem}
+            \label{Theorem:archivefailure}
+            It is possible to perform a fossil collection step which will identify these chunks
+            as not being referenced while not disrupting the Lock-Free Deduplication algorithm,
+            assuming there is a way to enumerate all chunks existing within a repository.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:archiveremoval}
+            Removing an archive does not disrupt the Lock-Free Deduplication algorithm besides
+            leaving unreferenced chunks behind.
+        \end{lemma}
+        \begin{proof}
+            An archive being removed before being seen by a fossil collection will at most cause
+            it to not turn some chunks into fossils, therefore not deleting them during fossil deletion.
+            An archive being removed after being seen by a fossil collection will at most cause its
+            fossil deletion to be delayed until the client creates a new archive.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            Assuming an archive referencing all chunks existing in the repository at a given point
+            was created, pruning it would take care of all chunks which are not referenced by any
+            other archive.
+            Since we can safely pretend this archive was immediately removed after being created as
+            proven by Lemma~\ref{lemma:archiveremoval} and therefore not seen by any other client we
+            can skip creating such an archive and just perform the fossil collection associated with
+            its pruning operation, treating the set of all chunks existing within the repository as
+            the set of chunks referenced by it.
+            Since this imaginary archive did not create any new chunks there are no new unreferenced
+            chunks to worry about.
+        \end{proof}
+    \end{frame}
+
+    \section{Recovering from a failed fossil collection}
+    \begin{frame}
+        \frametitle{Fossil collection failure}
+        When performing a fossil collection fails after some chunks where already turned into fossils
+        they must be prevented from existing in the repository indefinitely.
+        \begin{theorem}
+            Such fossils can be safely removed by first recovering all fossils existing within a
+            repository followed by the procedure described in Theorem~\ref{Theorem:archivefailure}.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            Idea: no chunks are deleted, erroneously recovered ones are taken care of by
+            Theorem~\ref{Theorem:archivefailure}.
+        \end{proof}
+    \end{frame}
+
+    \section{Adding clients}
+    \begin{frame}
+        \frametitle{Adding clients}
+        The paper~\cite{Duplicacy} treats the set of clients using a repository as being static,
+        but can this set be expanded?
+        \begin{theorem}
+            Expanding the set of clients does not disrupt the Lock-Free Deduplication algorithm. 
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:runafteradd}
+            Adding a client will not disrupt future fossil collections and deletions.
+        \end{lemma}
+        \begin{proof}
+            Adding a client will cause future fossil collections and deletions to treat him the same
+            as the existing clients, behaving as if the client has been part of a static client set
+            since the repository was created.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:collectwhileadd}
+            Adding a client will not disrupt fossil collections which where running at the time of
+            his addition.
+        \end{lemma}
+        \begin{proof}
+            The only way a new client can interact with a running fossil collection step is by
+            creating a new archive.
+            Should the fossil collection step see the new archive it will treat it the same as archives
+            created by existing clients, behaving as if the client has been part of a static client
+            set since the repository was created.
+            Should the fossil collection step not see the new archive it will behave the same as if
+            the client had been part of a static client set since the repository was created, with
+            the client not having created a single archive yet.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:deletewhileadd}
+            Adding a client will not disrupt fossil deletions which where running at the time of his
+            addition.
+        \end{lemma}
+        \begin{proof}
+            The fossil deletion seeing the new client will cause it to behave as if the client had
+            been part of a static client set since the repository was created, otherwise it will
+            behave as if the client does not exist.
+            Since a fossil deletion implementing Theorem~\ref{theorem:uniquefossils} will only access
+            fossils created by its associated fossil collection it won't interact the chunks created
+            by the new client since they have to be recreated should the client attempt to create archives
+            referencing these fossils according to Policy 2.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:usebeforeadd}
+            Adding a client will not disrupt fossil deletions which where using fossils created by
+            fossil collections which finished before it.
+        \end{lemma}
+        \begin{proof}
+            In case a fossil deletion is running at the time a client is being added it will not
+            be disrupted as proven by Lemma~\ref{lemma:deletewhileadd}.
+            Should this not be the case it will behave the same as if the client had been part of a
+            static client set since the repository was created, with the client not having created
+            a single archive yet.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            The possible interactions between the addition of a new client and the Lock-Free
+            Deduplication algorithm are as follows:
+            \begin{enumerate}
+                \item a fossil collection or deletion was running after it, which is safe as proven
+                    by Lemma~\ref{lemma:runafteradd}
+                \item a fossil collection or deletion step was running during it, which is safe as proven
+                    by Lemma~\ref{lemma:collectwhileadd} and Lemma~\ref{lemma:deletewhileadd}
+                \item a fossil deletion step is running after its associated fossil collection step
+                    finished before it, which is safe as proven by Lemma~\ref{lemma:usebeforeadd}
+            \end{enumerate}
+            In all cases adding a client won't disrupt the Lock-Free Deduplication algorithm.
+        \end{proof}
+    \end{frame}
+
+    \section{Removing clients}
+    \begin{frame}
+        \frametitle{Removing clients}
+        The paper~\cite{Duplicacy} treats the set of clients using a repository as being static,
+        but can this set be reduced?
+        \begin{theorem}
+            Reducing the set of clients does not disrupt the Lock-Free Deduplication algorithm beyond
+            the creation of unreferenced chunks and fossils without an associated fossil collection.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            Idea: The removal of clients only affects the checking for Policy 3, which is not a
+            problem since the policy ignoring a client can only happen after it finished any archive
+            creation which would result in the same outcome.
+        \end{proof}
+    \end{frame}
+
+    \section{References}
+    \begin{frame}
+        \frametitle{References}
+        \printbibliography{}
+    \end{frame}
+\end{document}
