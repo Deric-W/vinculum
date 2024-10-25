@@ -1,9 +1,10 @@
 \documentclass[english,utf8,aspectratio=169]{beamer}
 \usetheme{tud}
 \usecolortheme{tud}
-\graphicspath{{./img/}}
 \usepackage[backend = biber,style = numeric]{biblatex}
 \addbibresource{references.bib}
+\usepackage[inkscapepath={./build/svg-inkscape}]{svg}
+\svgpath{{./img/}}
 
 \AtBeginSection[]{\partpage{\usebeamertemplate***{part page}}}
 \setbeamertemplate{theorems}[numbered]
@@ -19,6 +20,42 @@
     \begin{frame}
         \frametitle{Outline}
         \tableofcontents
+    \end{frame}
+
+    \section{Introduction}
+    \begin{frame}
+        \frametitle{Fossil collection step}
+        \begin{columns}
+            \begin{column}{.5\textwidth}
+                \begin{itemize}
+                    \item identifies chunks to be deleted
+                    \item archives may be created in parallel, possibly after
+                        downloading manifest files
+                \end{itemize}
+                To prevent a race condition causing chunks to be deleted prematurely they
+                are first turned into fossils.
+            \end{column}
+            \begin{column}{.5\textwidth}
+                \includesvg[height=0.8\textheight, width=0.9\textwidth]{fossil_collection.drawio}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Fossil deletion step}
+        \begin{columns}
+            \begin{column}{.5\textwidth}
+                \begin{itemize}
+                    \item uses an existing fossil collection
+                    \item fossils which where referenced in the meantime are recovered
+                \end{itemize}
+                Is delayed~\cite[Policy 3]{Duplicacy} until referencing a chunk would cause a new
+                one to be uploaded~\cite[Policy 2]{Duplicacy}.
+            \end{column}
+            \begin{column}{.5\textwidth}
+                \includesvg[height=0.8\textheight, width=0.9\textwidth]{fossil_deletion.drawio}
+            \end{column}
+        \end{columns}
     \end{frame}
 
     \section{Concurrent archive deletions}
