@@ -58,11 +58,11 @@
         \end{columns}
     \end{frame}
 
-    \section{Concurrent archive deletions}
+    \section{Non-atomic retrieval operation}
     \begin{frame}
         \frametitle{Accessing all archives}
         \begin{itemize}
-            \item Lock-Free Deduplication requires an operation to retrieve all archive
+            \item Lock-Free Deduplication requires an operation to retrieve all manifest
                 files~\cite[Operation `downloadAllManifestFiles']{Duplicacy}
             \item on backends like POSIX filesystems this operation is split into listing
                 all files and accessing them
@@ -71,20 +71,79 @@
         \end{itemize}
         \begin{theorem}
             \label{theorem:archiveaccess}
-            Archives missing after being listed can be ignored.
+            Manifest files missing after being listed can be safely ignored.
         \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{A stronger guarantee}
+        \begin{itemize}
+            \item listing files itself may be a non-atomic operation
+            \item changes to a directory during listing may not be picked up
+        \end{itemize}
+        \begin{lemma}
+            Whether manifest files created or deleted during retrieval are picked up by the operation
+            or not does not disrupt the Lock-Free Deduplication algorithm.
+        \end{lemma}
+        \begin{corollary}
+            Since ignoring missing files after listing is equivalent to them not being picked up
+            by the retrieval operation Theorem~\ref{theorem:archiveaccess} would be true.
+        \end{corollary}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof idea}
+        \begin{columns}
+            \begin{column}{.6\textwidth}
+                The result of an atomic retrieval operation is a snapshot of a point during its
+                execution while the non-atomic one allows creations and deletions happening during
+                its execution to be moved freely before or after this point.
+            \end{column}
+            \begin{column}{.4\textwidth}
+                \includesvg[height=0.8\textheight, width=0.9\textwidth]{retrieval_cases.drawio}
+            \end{column}
+        \end{columns}
+        \vfill
+        It will be shown that any guarantees of an atomic implementation used by the algorithm
+        are also provided by an non-atomic operation.
     \end{frame}
 
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
-            \begin{enumerate}
-                \item Ignoring missing archives is equivalent to them not being listed
-                \item Deleting an archive causes it to not be listed 
-            \end{enumerate}
-            Therefore applying Theorem~\ref{theorem:archiveaccess} to the `downloadAllManifestFiles'
-            operation is equivalent to performing all archive deletions which would have happened
-            during the operation before the operation starts.
+            If a manifest operation happens during the execution of the retrieval operation an atomic
+            implementation can't guarantee whether or not the operation happens before the snapshot
+            or after it, the same as a non-atomic operation.
+            The same is true for manifest operations happening before or after the execution of the
+            retrieval operation, since a non-atomic operation can not move them before or after the
+            snapshot giving them the same visibility when using an atomic operation.
+            The only difference is that the non-atomic implementation does not preserves the ordering
+            between different manifest operations happening during the execution of the retrieval operation,
+            which is not used by the algorithm and it is assumed the clients won't either.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{On manifest operation ordering}
+        The fossil deletion step assumes that after Policy 3 is satisfied the retrieval operation
+        will have seen any archive which may reference its fossils, leading to problems in the
+        following scenario should only the second manifest bee seen:
+        \begin{center}
+            \includesvg[height=0.6\textheight, width=0.9\textwidth]{manifest_ordering.drawio}
+        \end{center}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        \begin{theorem}
+            Performing a second listing operation after Policy 3 is satisfied will see any manifests
+            which may reference the fossils.
+        \end{theorem}
+        \begin{proof}
+            Assuming an manifest which references the fossils is not seen by the retrieval operation.
+            Since it has to be created before the manifest satisfying Policy 3 for its
+            client~\cite[Policy 2]{Duplicacy} it has to be created during the retrieval operation
+            and therefore before a following second listing operation.
         \end{proof}
     \end{frame}
 
