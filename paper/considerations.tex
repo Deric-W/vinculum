@@ -66,28 +66,22 @@
                 files~\cite[Operation `downloadAllManifestFiles']{Duplicacy}
             \item on backends like POSIX filesystems this operation is split into listing
                 all files and accessing them
-            \item since archive files can be deleted at any time by a concurrently running
-                pruning operation accessing listed files can fail because they are missing
+            \item changes to a directory during listing may not be picked up
+            \item accessing files may itself be a non-atomic operation (chunked manifests)
+            \item since manifest files can be deleted at any time by a concurrently running
+                pruning operation accessing listed files can fail because they where deleted
         \end{itemize}
-        \begin{theorem}
-            \label{theorem:archiveaccess}
-            Manifest files missing after being listed can be safely ignored.
-        \end{theorem}
     \end{frame}
 
     \begin{frame}
-        \frametitle{A stronger guarantee}
-        \begin{itemize}
-            \item listing files itself may be a non-atomic operation
-            \item changes to a directory during listing may not be picked up
-        \end{itemize}
+        \frametitle{Solution}
         \begin{lemma}
             Whether manifest files created or deleted during retrieval are picked up by the operation
             or not does not disrupt the Lock-Free Deduplication algorithm.
         \end{lemma}
         \begin{corollary}
-            Since ignoring missing files after listing is equivalent to them not being picked up
-            by the retrieval operation Theorem~\ref{theorem:archiveaccess} would be true.
+            Since ignoring deleted files after listing is equivalent to their deletion being picked
+            up by the retrieval operation it is safe to do so.
         \end{corollary}
     \end{frame}
 
@@ -100,7 +94,7 @@
                 its execution to be moved freely before or after this point.
             \end{column}
             \begin{column}{.4\textwidth}
-                \includesvg[height=0.8\textheight, width=0.9\textwidth]{retrieval_cases.drawio}
+                \includesvg[height=0.8\textheight, width=0.9\textwidth, pretex=\small]{retrieval_cases.drawio}
             \end{column}
         \end{columns}
         \vfill
@@ -127,9 +121,9 @@
         \frametitle{On manifest operation ordering}
         The fossil deletion step assumes that after Policy 3 is satisfied the retrieval operation
         will have seen any archive which may reference its fossils, leading to problems in the
-        following scenario should only the second manifest bee seen:
+        following scenario should only the second manifest be seen:
         \begin{center}
-            \includesvg[height=0.6\textheight, width=0.9\textwidth]{manifest_ordering.drawio}
+            \includesvg[height=0.6\textheight, width=0.9\textwidth, pretex=\small]{manifest_ordering.drawio}
         \end{center}
     \end{frame}
 
