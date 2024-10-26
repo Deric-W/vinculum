@@ -141,7 +141,7 @@
         \end{proof}
     \end{frame}
 
-    \section{Race condition during chunk accesses}
+    \section{Non-atomic chunk access}
     \begin{frame}
         \frametitle{Accessing a chunk}
         \begin{block}{Fossil access policy~\cite[Policy 2]{Duplicacy}}
@@ -154,84 +154,32 @@
             \end{enumerate}
         \end{block}
         \begin{theorem}
-            The fossil access policy is affected by a race condition which can cause chunks
-            to appear as missing.
+            The fossil access policy is affected by a race condition in case the chunk and fossil
+            accesses are two separate operations which can cause chunks to appear as missing.
         \end{theorem}
     \end{frame}
 
     \begin{frame}
-        \frametitle{Proof}
-        \begin{lemma}
-            \label{lemma:chunk2fossil}
-            It is possible to convert a chunk into a fossil while accessing it.
-        \end{lemma}
-        \begin{proof}
-            A fossil collection can be started which prunes the only archive referencing a chunk
-            and halted after downloading all archive files (for example by a processing or network delay).
-            When the fossil collection is later resumed it will turn the chunk into a fossil,
-            even if in the meantime another archive which references the chunk has been created.
-        \end{proof}
-    \end{frame}
-
-    \begin{frame}
-        \frametitle{Proof}
-        \begin{lemma}
-            \label{lemma:fossil2chunk}
-            It is possible to recover the fossil of a chunk while accessing it.
-        \end{lemma}
-        \begin{proof}
-            A fossil collection which erroneously creates fossils can be created as shown in
-            Lemma~\ref{lemma:chunk2fossil}, which will cause the following fossil deletion
-            to recover the erroneously created fossils.
-            This may happen while another clients tries to access them.
-        \end{proof}
-    \end{frame}
-
-    \begin{frame}
-        \frametitle{Proof}
-        \begin{lemma}
-            \label{lemma:chunkparallel}
-            The operations described described by Lemma~\ref{lemma:chunk2fossil} and
-            Lemma~\ref{lemma:fossil2chunk} may be executed in parallel.
-        \end{lemma}
-        \begin{proof}
-            There is a way for multiple clients to create pending fossil deletions as described
-            in Lemma~\ref{lemma:fossil2chunk} which can be performed at will while also
-            allowing fossil collections as described in Lemma~\ref{lemma:chunk2fossil} to happen
-            in parallel.
-            Multiple clients performing fossil collection and deletion in parallel is allowed by
-            the Lock-Free Deduplication algorithm~\cite[Theorem 2]{Duplicacy}.
-        \end{proof}
+        \frametitle{Possible fossil operations}
+        Archive \#1 and \#2 reference the same chunk (exclusively).
+        \begin{center}
+            \includesvg[height=0.75\textheight, width=0.9\textwidth, pretex=\small]{nonatomic_access.drawio}
+        \end{center}
     \end{frame}
 
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
+            When executing the fossil collection and deletion steps started in the example the
+            following sequence of events is possible:
             \begin{enumerate}
-                \item Some clients perform a fossil collection as described in Lemma~\ref{lemma:fossil2chunk}
-                    in parallel, which leaves the chunk as a fossil to recovered at fossil deletion
-                \item Every client creates an archive, allowing for the fossil deletion to proceed
-                \item Some clients begin a fossil collection as described in Lemma~\ref{lemma:chunk2fossil},
-                    but halt it as described in the lemma
-                \item A new archive referencing the chunk is created, causing a new chunk to be uploaded
-                    as dictated by the fossil access policy~\cite[Policy 2]{Duplicacy}
-            \end{enumerate}
-        \end{proof}
-    \end{frame}
-
-    \begin{frame}
-        \frametitle{Proof}
-        \begin{proof}
-            With the operations described by Lemma~\ref{lemma:chunk2fossil} and
-            Lemma~\ref{lemma:fossil2chunk} and their parallel execution as shown in
-            Lemma~\ref{lemma:chunkparallel} it is possible to cause the following sequence of events:
-            \begin{enumerate}
-                \item A chunk is turned into a fossil
+                \item A chunk is turned into a fossil (by a fossil collection step)
                 \item A client tries to access the chunk and fails
-                \item The chunk is recovered from its fossil
+                \item The chunk is recovered from its fossil (by a fossil deletion step)
                 \item The client tries to access the fossil and fails
             \end{enumerate}
             From the perspective of the client the chunk is missing from the repository.
+            The sequence can be repeated as long as there are pending fossil deletions.
         \end{proof}
     \end{frame}
 
@@ -240,28 +188,45 @@
         A client may alternate between trying to access a chunk and its fossil, but can this
         action result in an infinite loop?
         \begin{theorem}
-            The number of times a chunk can be recovered from its fossil during it being
-            accessed is finite, assuming the accessing client generates a finite amount
-            of new archives while accessing it and only performs a finite amount of fossil
-            deletions at a time.
+            Assuming every chunk access is tied to an archive which references the chunk, the
+            accessing client generates a finite amount of new archives while accessing it
+            and clients only have a finite amount of pending fossil deletion steps which in turn
+            only perform a finite amount of operations on each fossil.
+            By periodically checking whether this archive exists and references the chunk
+            a client will after a finite amount of time either find the chunk or detect that it
+            was deleted.
         \end{theorem}
-        \begin{corollary}
-            Since this causes the chunk to remain a fossil the client will eventually succeed
-            in accesing it.
-        \end{corollary}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:finiteoperations}
+            Under the stated assumptions a client can assume that a fossil it is trying to access
+            will only be operated on by a finite number of operations.
+        \end{lemma}
+        \begin{proof}
+            When the client creates only a finite amount there has to be an archive which is the
+            last archive created during the chunk access by the client.
+            A fossil deletion step must make sure Policy 3~\cite{Duplicacy} is satisfied before
+            continuing, causing new pending fossil deletion steps to wait until the client creates
+            a new archive.
+            The existing finite number of pending fossil deletion steps can together only perform
+            a finite amount of operations on the fossil.
+        \end{proof}
     \end{frame}
 
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
-            When the client creates only a finite amount of archives there has to be an archive
-            which is the last archives created during the chunk access by the client.
-            A fossil deletion must make sure Policy 2~\cite{Duplicacy} is satisfied before
-            continuing, preventing it from being performed unless its fossil collection ended
-            before the last archive was created.
-            Since each client only performs a finite amount of fossil deletions at a time
-            there is only a finite amount of fossil deletions which satisfy Policy 2~\cite{Duplicacy},
-            causing the chunk to remain a fossil after all of them have been executed.
+            After the finite amount of operations in Lemma~\ref{lemma:finiteoperations} have passed
+            the client may either find the chunk or its fossil or notice the archive check failing.
+            The archive check succeeding implies the referenced chunk (or fossil) existed at the time
+            of the check, which combined with no new operations on its fossil will prevent it from
+            being deleted in the meantime therefore making the check succeeding impossible should
+            this be the case.
+            %NOTE: checking the archive existence alone is not enough since it can be replaced by
+            %another archive referencing different chunks.
         \end{proof}
     \end{frame}
 
