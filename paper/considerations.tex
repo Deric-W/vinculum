@@ -232,25 +232,52 @@
 
     \section{Race condition during fossil collection and deletion}
     \begin{frame}
-        \frametitle{Race condition during fossil collection and deletion}
+        \frametitle{A flawed proof}
         \begin{theorem}
-            It is possible to delete a chunk while it is still being referenced by an archive
-            when following the Lock-Free Deduplication algorithm.
+            The proof that some processes running the fossil collection step while others run the
+            fossil deletion step is lock-free~\cite[Theorem 1, Case 3]{Duplicacy} is flawed since
+            the processes can influence eachother by operating on the same chunk or fossil.
         \end{theorem}
+        \begin{proof}
+            Since both steps operate on both fossils and chunks (by renaming between the two) and
+            the chunks (or fossils) contained in the local fossil collection files don't have to be
+            unique they can operate on the same fossil or chunk, causing a fossil in the following
+            example to be deleted prematurely.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Example}
+        Archive \#1, \#2 and \#3 reference the same chunk (exclusively).
+        \begin{center}
+            \includesvg[height=0.75\textheight, width=0.9\textwidth, pretex=\tiny]{fossil_race_condition.drawio}
+        \end{center}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        \begin{theorem}
+            \label{theorem:singleclient}
+            Assuming archives pruned by a fossil deletion step are only removed during its execution.
+            By limiting fossil collection and deletion steps to a single client and the number of
+            pending fossil deletions to one fossil collection and deletion steps influencing each
+            other do not disrupt the Lock-Free Deduplication algorithm.
+            %NOTE: might simplify non-atomic chunk accesses or other implementations
+        \end{theorem}
+        Since Duplicacy itself~\cite[prune]{Duplicacy-Wiki} uses a similar approach it seems to be
+        acceptable for most use cases.
     \end{frame}
 
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
-            Assuming a repository which has 3 clients, one of them being about to perform a
-            fossil deletion after all of them created archives to satisfy Policy 3.
-            After this fossil deletion downloads all archive files to check Policy 3 and determining
-            a certain fossil to be safe to delete the other two clients beform the following actions:
+            The following interactions are possible:
             \begin{enumerate}
-                \item create an archive which causes the chunk of the fossil to be recreated
-                \item initiate a fossil collection to prune this archive by downloading all archive files
-                \item create another archive which also references the chunk of the first archive
-                \item finish the fossil collection by turning the recreated chunk into a fossil
+                \item A fossil collection step reverts a fossil recovery
+                \item A fossil collection step creates a fossil operated on by a fossil deletion step
+                \item A fossil deletion step recovers a fossil
+                \item A fossil deletion step deletes a fossil
+                \item A fossil deletion step creates a chunk operated on by a fossil collection step
             \end{enumerate}
         \end{proof}
     \end{frame}
@@ -258,34 +285,47 @@
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
-            Now the second archive references a fossil which would be recovered by the following
-            fossil deletion step.
-            But since the already running fossil deletion step determined the same fossil to be safe
-            to delete it will delete it causing the second archive to reference a not existing chunk.
+            \begin{enumerate}
+                \item Should it revert a fossil recovery the fossil was once determined to be referenced by
+            a fossil deletion step and should therefore only be fossilised after the referencing
+            archives seen by the fossil deletion step where either removed or selected to be
+            pruned by the fossil collection step.
+            Since the fossil deletion step completed before the fossil collection step started
+                    any remaining archives still referencing the fossil are seen by the fossil collection step.
+                \item Should it create a fossil on which a fossil deletion step operates the fossil deletion
+                    step may recover or delete the fossil which will be proven not to disrupt the Lock-Free
+                    Deduplication algorithm by case 3 and 4.
+            \end{enumerate}
         \end{proof}
     \end{frame}
 
     \begin{frame}
-        \frametitle{Solution}
-        \begin{theorem}
-            \label{theorem:uniquefossils}
-            By preventing fossils produced by a fossil collection from being deleted by a fossil
-            deletion not associated with it referenced chunks can't be deleted.
-        \end{theorem}
+        \begin{proof}
+            \begin{enumerate}
+                \setcounter{enumi}{2}
+                \item Should the fossil deletion step recover a fossil it was once thought to be unreferenced
+                    and should therefore be only recovered if it is referenced again.
+            Since a fossil deletion step prevents fossil collection steps from pruning archives
+            during its execution a seen archive will still exist at the time the fossil is recovered.
+                \item Should the fossil deletion step delete a fossil it should only do so when there is no
+            archive still referencing it.
+            Since the fossil deletion step can only receive a fossil from its fossil collection
+            step or one before it it can only start after Policy 3~\cite{Duplicacy} ensures no
+            new archive can reference fossils created before its fossil collection step ended and
+            therefore any archive still referencing the fossil will be seen by it.
+            \end{enumerate}
+        \end{proof}
     \end{frame}
 
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
-            Assuming a referenced chunk was deleted by a fossil deletion step.
-            This means the chunk was turned into a fossil by the associated fossil collection step,
-            implying all archives referencing it where selected to be pruned.
-            But it being referenced after the fossil deletion step means the creation of a new archive
-            not seen by the fossil collection step referenced the chunk before Policy 2 would have
-            caused it to be recreated, otherwise the recreated chunk would have caused its fossil
-            to be safe to delete.
-            Since such an archive would have caused the check for Policy 3 to fail until it was seen
-            by the fossil deletion step it would have caused the chunk to not be deleted.
+            \begin{enumerate}
+                \setcounter{enumi}{4}
+                \item Should the fossil deletion step recover a chunk into a fossil on which a fossil
+            collection step operates the fossil collection may revert it which was proven not to
+                    disrupt the Lock-Free Deduplication algorithm by case 1.
+            \end{enumerate}
         \end{proof}
     \end{frame}
 
