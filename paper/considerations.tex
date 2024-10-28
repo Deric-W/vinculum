@@ -541,17 +541,23 @@
         The paper~\cite{Duplicacy} treats the set of clients using a repository as being static,
         but can this set be reduced?
         \begin{theorem}
+            Assuming a client will finish all running operations before being removed.
             Reducing the set of clients does not disrupt the Lock-Free Deduplication algorithm beyond
-            the creation of unreferenced chunks and fossils without an associated fossil collection.
+            the creation of fossils without an associated fossil collection.
         \end{theorem}
     \end{frame}
 
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
-            Idea: The removal of clients only affects the checking for Policy 3, which is not a
-            problem since the policy ignoring a client can only happen after it finished any archive
-            creation which would result in the same outcome.
+            Removal of a client only influences future validations of Policy 3, which will ignore
+            the client.
+            Since manifest files can only be created by the client before it was removed there can
+            be no running archive creations by the client and therefore any manifest file from him
+            still referencing fossils will be seen by the following fossil deletion step.
+            This is the same guarantee provided by Policy 3 had the client not been removed.
+            Should the client be removed before running a fossil deletion step the fossils contained
+            in its fossil collection will be left behind.
         \end{proof}
     \end{frame}
 
