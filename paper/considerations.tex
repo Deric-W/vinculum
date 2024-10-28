@@ -494,10 +494,11 @@
             The fossil deletion seeing the new client will cause it to behave as if the client had
             been part of a static client set since the repository was created, otherwise it will
             behave as if the client does not exist.
-            Since a fossil deletion implementing Theorem~\ref{theorem:uniquefossils} will only access
-            fossils created by its associated fossil collection it won't interact the chunks created
-            by the new client since they have to be recreated should the client attempt to create archives
-            referencing these fossils according to Policy 2.
+            Since a fossil deletion step implementing Theorem~\ref{theorem:singleclient} will only
+            access fossils created before its associated fossil collection step finished it won't
+            interact with the chunks created by the new client since they have to be recreated
+            should the client attempt to create archives referencing these fossils according to
+            Policy 2.
         \end{proof}
     \end{frame}
 
