@@ -329,7 +329,7 @@
         \end{proof}
     \end{frame}
 
-    \section{Recovering from a failed archive creation}
+    \section{Handling unreferenced chunks}
     \begin{frame}
         \frametitle{Archive creation failure}
         When creating an archive fails after some chunks where already uploaded to the repository
@@ -351,10 +351,11 @@
             leaving unreferenced chunks behind.
         \end{lemma}
         \begin{proof}
-            An archive being removed before being seen by a fossil collection will at most cause
-            it to not turn some chunks into fossils, therefore not deleting them during fossil deletion.
-            An archive being removed after being seen by a fossil collection will at most cause its
-            fossil deletion to be delayed until the client creates a new archive.
+            An archive being removed before being seen by a fossil collection will at most cause some
+            of its chunks to be either turned into fossils and handled by its fossil deletion step
+            or being left behind as unreferenced chunks.
+            An archive being removed after being seen by a fossil collection step will at most cause
+            its associated fossil deletion step to be delayed until the client creates a new archive.
         \end{proof}
     \end{frame}
 
@@ -365,12 +366,14 @@
             was created, pruning it would take care of all chunks which are not referenced by any
             other archive.
             Since we can safely pretend this archive was immediately removed after being created as
-            proven by Lemma~\ref{lemma:archiveremoval} and therefore not seen by any other client we
-            can skip creating such an archive and just perform the fossil collection associated with
-            its pruning operation, treating the set of all chunks existing within the repository as
-            the set of chunks referenced by it.
-            Since this imaginary archive did not create any new chunks there are no new unreferenced
-            chunks to worry about.
+            proven by Lemma~\ref{lemma:archiveremoval} (with no new unreferenced chunks being created)
+            and therefore not seen by any other client we can skip creating such an archive and just
+            perform the fossil collection step associated with its pruning operation, treating the
+            set of all chunks existing within the repository as the set of chunks referenced by it.
+            A chunk being fossilised before the fossil collection step doing the same can be
+            prevented by performing the chunk listing immediately before the fossil collection step
+            by the same client which will prevent other fossil collection steps from running in
+            between as a result of Theorem~\ref{theorem:singleclient}.
         \end{proof}
     \end{frame}
 
