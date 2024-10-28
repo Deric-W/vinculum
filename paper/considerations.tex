@@ -380,8 +380,9 @@
     \section{Recovering from a failed fossil collection}
     \begin{frame}
         \frametitle{Fossil collection failure}
-        When performing a fossil collection fails after some chunks where already turned into fossils
-        they must be prevented from existing in the repository indefinitely.
+        When performing a fossil collection step fails after some chunks where already
+        turned into fossils or a fossil deletion step fails before either recovering or deleting a
+        fossil they must be prevented from existing in the repository indefinitely.
         \begin{theorem}
             Such fossils can be safely removed by first recovering all fossils existing within a
             repository followed by the procedure described in Theorem~\ref{Theorem:archivefailure}.
@@ -391,8 +392,54 @@
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
-            Idea: no chunks are deleted, erroneously recovered ones are taken care of by
-            Theorem~\ref{Theorem:archivefailure}.
+            The recovered fossil (or its chunk) can at its point of recovery either be operated
+            on by nobody, a fossil collection step or a fossil deletion step.
+            Should they be operated on by nobody recovering it may create an unreferenced chunk, which
+            will be taken care of by Theorem~\ref{Theorem:archivefailure}.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof (fossil collection step)}
+        \begin{proof}
+            Should they be operated on by a fossil collection recovering it will either revert a
+            fossilization or cause it to be fossilised again.
+            Should the recovery revert a fossilization the associated fossil deletion step will
+            assume it was already recovered by another fossil deletion step and ignore it while
+            the recovered chunk will be taken care of by Theorem~\ref{Theorem:archivefailure}
+            should it be unreferenced.
+            Should the recovered chunk be fossilised again it was determined to be unreferenced
+            and processed by its associated fossil deletion step after Policy 3 made sure that
+            all manifest files which still reference it are seen by the fossil deletion step.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof (fossil deletion step)}
+        \begin{proof}
+            Should they be operated on by a fossil deletion step it will either delete the fossil
+            or recover it, both before or after recovery.
+            The fossil deletion step deleting or recovering the fossil before recovery may cause
+            the recovery to fail, which can be ignored since the fossil has been taken care of.
+            The fossil deletion step deleting it after recovery will cause it to be ignored by the
+            fossil deletion step and the ecovered chunk being taken care of by
+            Theorem~\ref{Theorem:archivefailure} should it be unreferenced.
+            The fossil deletion step recovering it after recovery may cause the fossil deletion step
+            to receive an error, which can be ignored since the fossil missing can only be caused
+            by it already being recovered.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof (fossil deletion step)}
+        \begin{proof}
+            It being deleted is impossible since the fossil deletion step which deleted it has to
+            complete before the current can start as dictated by Theorem~\ref{theorem:singleclient},
+            which in turn means that any manifest files which caused the fossil to be recovered
+            where created after it retrieved all manifest files and therefore after the manifests
+            which satisfied Policy 3.
+            Since this means they had to create a new chunk as dictated by Policy 2 the fossil
+            which as about to be recovered is not the fossil which was deleted.
         \end{proof}
     \end{frame}
 
