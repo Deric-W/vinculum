@@ -355,7 +355,9 @@
             of its chunks to be either turned into fossils and handled by its fossil deletion step
             or being left behind as unreferenced chunks.
             An archive being removed after being seen by a fossil collection step will at most cause
-            its associated fossil deletion step to be delayed until the client creates a new archive.
+            its associated fossil deletion step to be delayed until the client creates a new archive
+            or a referenced chunk being fossilised by another fossil collection step, which will
+            be ignored~\cite[Theorem 2, Case 1]{Duplicacy}.
         \end{proof}
     \end{frame}
 
@@ -370,10 +372,6 @@
             and therefore not seen by any other client we can skip creating such an archive and just
             perform the fossil collection step associated with its pruning operation, treating the
             set of all chunks existing within the repository as the set of chunks referenced by it.
-            A chunk being fossilised before the fossil collection step doing the same can be
-            prevented by performing the chunk listing immediately before the fossil collection step
-            by the same client which will prevent other fossil collection steps from running in
-            between as a result of Theorem~\ref{theorem:singleclient}.
         \end{proof}
     \end{frame}
 
