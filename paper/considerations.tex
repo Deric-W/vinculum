@@ -76,7 +76,7 @@
 
     \begin{frame}
         \frametitle{Example}
-        Archive \#1, \#2 and \#3 reference the same chunk (exclusively).
+        Manifest files \#1, \#2 and \#3 reference the same chunk (exclusively).
         \begin{center}
             \includesvg[height=0.75\textheight, width=0.9\textwidth, pretex=\tiny]{fossil_race_condition.drawio}
         \end{center}
@@ -86,10 +86,10 @@
         \frametitle{Solution}
         \begin{theorem}
             \label{theorem:singleclient}
-            Assuming archives pruned by a fossil deletion step are only removed during its execution.
+            Assuming archives pruned by a fossil collection step are only removed during its execution.
             By limiting fossil collection and deletion steps to a single client and the number of
-            pending fossil deletions to one fossil collection and deletion steps influencing each
-            other do not disrupt the Lock-Free Deduplication algorithm.
+            pending fossil deletions steps to one fossil collection and deletion steps influencing
+            each other does not disrupt the Lock-Free Deduplication algorithm.
         \end{theorem}
         Since Duplicacy itself~\cite[prune]{Duplicacy-Wiki} uses a similar approach it seems to be
         acceptable for most use cases.
@@ -113,10 +113,10 @@
         \frametitle{Proof}
         \begin{proof}
             \begin{enumerate}
-                \item Should it revert a fossil recovery the fossil was once determined to be referenced by
-                    a fossil deletion step and should therefore only be fossilised after the referencing
-                    archives seen by the fossil deletion step where either removed or selected to be
-                    pruned by the fossil collection step.
+                \item Should it revert a fossil recovery the fossil was once determined to be referenced
+                    by a fossil deletion step and should therefore only be fossilised after the
+                    referencing manifest files seen by the fossil deletion step where either removed
+                    or selected to be pruned by the fossil collection step.
                     Since the fossil deletion step completed before the fossil collection step started
                     any remaining archives still referencing the fossil are seen by the fossil collection step.
                 \item Should it create a fossil on which a fossil deletion step operates the fossil deletion
@@ -173,10 +173,10 @@
 
     \begin{frame}
         \frametitle{Solution}
-        \begin{lemma}
+        \begin{theorem}
             Whether manifest files created or deleted during retrieval are picked up by the operation
             or not does not disrupt the Lock-Free Deduplication algorithm.
-        \end{lemma}
+        \end{theorem}
         \begin{corollary}
             Since ignoring deleted files after listing is equivalent to their deletion being picked
             up by the retrieval operation it is safe to do so.
@@ -229,7 +229,7 @@
         \frametitle{Solution}
         \begin{theorem}
             Performing a second listing operation after Policy 3 is satisfied will see any manifests
-            which may reference the fossils.
+            which may still reference the fossils.
         \end{theorem}
         \begin{proof}
             Assuming an manifest which references the fossils is not seen by the retrieval operation.
@@ -259,7 +259,7 @@
 
     \begin{frame}
         \frametitle{Possible fossil operations}
-        Archive \#1 and \#2 reference the same chunk (exclusively).
+        Manifest files \#1 and \#2 reference the same chunk (exclusively).
         \begin{center}
             \includesvg[height=0.75\textheight, width=0.9\textwidth, pretex=\small]{nonatomic_access.drawio}
         \end{center}
@@ -286,8 +286,7 @@
         A client may alternate between trying to access a chunk and its fossil, but can this
         action result in an infinite loop?
         \begin{theorem}
-            Assuming every chunk access is tied to an archive which references the chunk and the
-            client does not create any manifest files while accessing it.
+            Assuming the client does not create any manifest files while accessing a chunk.
             By performing the access pattern in Policy 2 two times a client will either find the
             chunk or detect that it was deleted.
         \end{theorem}
@@ -299,12 +298,12 @@
             A fossil deletion step must make sure Policy 3~\cite{Duplicacy} is satisfied before
             continuing, causing new pending fossil deletion steps to wait until the client creates
             a new archive.
-            Since ~\ref{theorem:singleclient} limits the amount of pending fossil deletion steps
-            to one the chunk may only be recovered once during the access.
+            Since Theorem~\ref{theorem:singleclient} limits the amount of pending fossil deletion
+            steps to one the chunk may only be recovered once during the access.
             Should the first chunk and fossil access fail because of the fossil being deleted the
             client will retry one more time before either finding a recreated chunk or determing
             it to be deleted.
-            Should it fail because of the chunk being recovered by a fossil deletion step the chunk
+            Should it fail because of the fossil being recovered by a fossil deletion step the chunk
             can't be recovered again or deleted during the second access and is therefore found.
         \end{proof}
     \end{frame}
@@ -329,31 +328,31 @@
         \frametitle{Proof}
         \begin{lemma}
             \label{lemma:archiveremoval}
-            Removing an archive does not disrupt the Lock-Free Deduplication algorithm besides
+            Removing a manifest file does not disrupt the Lock-Free Deduplication algorithm besides
             leaving unreferenced chunks behind.
         \end{lemma}
         \begin{proof}
-            An archive being removed before being seen by a fossil collection will at most cause some
-            of its chunks to be either turned into fossils and handled by its fossil deletion step
-            or being left behind as unreferenced chunks.
-            An archive being removed after being seen by a fossil collection step will at most cause
-            its associated fossil deletion step to be delayed until the client creates a new archive
-            or a referenced chunk being fossilised by another fossil collection step, which will
-            be ignored~\cite[Theorem 2, Case 1]{Duplicacy}.
+            A manifest file being removed before being seen by a fossil collection will at most
+            cause some of its chunks to be either turned into fossils and handled by its fossil
+            deletion step or being left behind as unreferenced chunks.
+            A manifest file being removed after being seen by a fossil collection step will at most
+            cause its associated fossil deletion step to be delayed until the client creates a new
+            manifest file or a referenced chunk being fossilised by another fossil collection step,
+            which will be ignored~\cite[Theorem 2, Case 1]{Duplicacy}.
         \end{proof}
     \end{frame}
 
     \begin{frame}
         \frametitle{Proof (unreferenced chunks)}
         \begin{proof}
-            Assuming an archive referencing all chunks existing in the repository at a given point
-            was created, pruning it would take care of all chunks which are not referenced by any
-            other archive.
-            Since we can safely pretend this archive was immediately removed after being created as
-            proven by Lemma~\ref{lemma:archiveremoval} (with no new unreferenced chunks being created)
-            and therefore not seen by any other client we can skip creating such an archive and just
-            perform the fossil collection step associated with its pruning operation, treating the
-            set of all chunks existing within the repository as the set of chunks referenced by it.
+            Assuming a manifest file referencing all chunks existing in the repository at a given
+            point was created, pruning it would take care of all chunks which are not referenced
+            by any other manifest file.
+            Since we can safely pretend this manifest file was immediately removed after being created
+            as proven by Lemma~\ref{lemma:archiveremoval} (with no new unreferenced chunks being created)
+            and therefore not seen by any other client we can skip creating it and just perform the
+            fossil collection step associated with its pruning operation, treating the set of all chunks
+            existing within the repository as the set of chunks referenced by it.
         \end{proof}
     \end{frame}
 
@@ -385,12 +384,12 @@
         \frametitle{Proof}
         \begin{lemma}
             \label{lemma:runafteradd}
-            Adding a client will not disrupt future fossil collections and deletions.
+            Adding a client will not disrupt future fossil collection and deletion steps.
         \end{lemma}
         \begin{proof}
-            Adding a client will cause future fossil collections and deletions to treat him the same
-            as the existing clients, behaving as if the client has been part of a static client set
-            since the repository was created.
+            Adding a client will cause future fossil collection and deletion steps to treat him the
+            same as the existing clients, behaving as if the client has been part of a static client
+            set since the repository was created.
         \end{proof}
     \end{frame}
 
@@ -398,18 +397,18 @@
         \frametitle{Proof}
         \begin{lemma}
             \label{lemma:collectwhileadd}
-            Adding a client will not disrupt fossil collections which where running at the time of
-            his addition.
+            Adding a client will not disrupt fossil collection steps which where running at the
+            time of his addition.
         \end{lemma}
         \begin{proof}
             The only way a new client can interact with a running fossil collection step is by
             creating a new archive.
-            Should the fossil collection step see the new archive it will treat it the same as archives
-            created by existing clients, behaving as if the client has been part of a static client
-            set since the repository was created.
-            Should the fossil collection step not see the new archive it will behave the same as if
-            the client had been part of a static client set since the repository was created, with
-            the client not having created a single archive yet.
+            Should the fossil collection step see a new manifest file it will treat it the same as
+            manifest files created by existing clients, behaving as if the client has been part of a
+            static client set since the repository was created.
+            Should the fossil collection step not see the new manifest file it will behave the same
+            as if the client had been part of a static client set since the repository was created,
+            with the client not having created a single archive yet.
         \end{proof}
     \end{frame}
 
