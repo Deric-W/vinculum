@@ -286,6 +286,7 @@
         A client may alternate between trying to access a chunk and its fossil, but can this
         action result in an infinite loop?
         \begin{theorem}
+            \label{theorem:nonatomic-chunks}
             Assuming the client does not create any manifest files while accessing a chunk.
             By performing the access pattern in Policy 2 two times a client will either find the
             chunk or detect that it was deleted.
@@ -367,6 +368,8 @@
             by Theorem~\ref{theorem:singleclient} (Case 3,4 and 5 in Proof).
             Since it will either recover or delete the fossils they will no longer exist in the
             repository.
+            To prevent the fossil deletion step from interfering with Theorem~\ref{theorem:nonatomic-chunks}
+            by recovering a fossil multiple times the fossil collection has to be deduplicated.
         \end{proof}
     \end{frame}
 
