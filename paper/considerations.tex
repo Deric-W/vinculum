@@ -326,34 +326,18 @@
     \end{frame}
 
     \begin{frame}
-        \frametitle{Proof}
-        \begin{lemma}
-            \label{lemma:archiveremoval}
-            Removing a manifest file does not disrupt the Lock-Free Deduplication algorithm besides
-            leaving unreferenced chunks behind.
-        \end{lemma}
-        \begin{proof}
-            A manifest file being removed before being seen by a fossil collection will at most
-            cause some of its chunks to be either turned into fossils and handled by its fossil
-            deletion step or being left behind as unreferenced chunks.
-            A manifest file being removed after being seen by a fossil collection step will at most
-            cause its associated fossil deletion step to be delayed until the client creates a new
-            manifest file or a referenced chunk being fossilised by another fossil collection step,
-            which will be ignored~\cite[Theorem 2, Case 1]{Duplicacy}.
-        \end{proof}
-    \end{frame}
-
-    \begin{frame}
         \frametitle{Proof (unreferenced chunks)}
         \begin{proof}
             Assuming a manifest file referencing all chunks existing in the repository at a given
             point was created, pruning it would take care of all chunks which are not referenced
             by any other manifest file.
-            Since we can safely pretend this manifest file was immediately removed after being created
-            as proven by Lemma~\ref{lemma:archiveremoval} (with no new unreferenced chunks being created)
-            and therefore not seen by any other client we can skip creating it and just perform the
-            fossil collection step associated with its pruning operation, treating the set of all chunks
-            existing within the repository as the set of chunks referenced by it.
+            We can pretend this manifest file was created and perform the fossil collection step
+            associated with its pruning operation by treating the set of all chunks existing within
+            the repository as the set of chunks referenced by it and not deleting it after completion.
+            Since Theorem~\ref{theorem:singleclient} prevents other fossil collection and deletion
+            steps from running in parallel they can not tell the difference between the manifest file
+            being deleted after the pruning operation or it never having been created in the first
+            place.
         \end{proof}
     \end{frame}
 
