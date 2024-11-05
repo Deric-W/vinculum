@@ -156,6 +156,94 @@
         \end{proof}
     \end{frame}
 
+    \section{Manifest files being replaced}
+    \begin{frame}
+        \frametitle{Manifest files can change}
+        \begin{theorem}
+            Assuming a client can replace an existing manifest file.
+            Deciding whether a manifest file was not seen by the fossil collection step by storing
+            a list of seen manifest file names can disrupt the Lock-Free Deduplication algorithm.
+        \end{theorem}
+        \begin{proof}
+            In the following example a client replaces a manifest file which was seen by a fossil
+            collection step, causing its associated fossil deletion step to not consider it a new
+            manifest file and therefore not check for referenced fossils.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Example}
+        Manifest file \#1 is replaced, referencing a fossil.
+        \begin{center}
+            \includesvg[height=0.75\textheight, width=0.9\textwidth, pretex=\small]{manifest_replacement.drawio}
+        \end{center}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        \begin{theorem}
+            \label{theorem:nopreviousmanifests}
+            Assuming the pruned manifest files are deleted during the fossil collection step.
+            By treating all seen manifest files as new the associated fossil deletion step will
+            correctly identify fossils as referenced or not.
+        \end{theorem}
+        \begin{proof}
+            The change causes the set of new manifest files to additionaly contain manifests seen
+            by the fossil collection step.
+            They can not cause Policy 3 to be triggered prematurely since they where created before
+            the fossil collection step finished and can therefore never satisfy it.
+            Any fossils recovered by them will replace their existing chunks and be referenced by
+            them while the deletion of the pruned manifest files prevents any fossils from being
+            erroneously recovered.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Problem solved?}
+        \begin{theorem}
+            Assuming a client replacing a manifest file accepts unreferenced chunks to be created
+            or the new manifest file being deleted after a retention policy decided for its
+            predecessor to be pruned.
+            By implementing Theorem~\ref{theorem:nopreviousmanifests} a client replacing a manifest
+            file will not disrupt the Lock-Free Deduplication algorithm.
+        \end{theorem}
+        The assumtions stem from the fact that replacing a manifest file always risks unreferenced
+        chunks to be created.
+        Furthermore, many retention policies based on the manifest creation timestamp will not
+        wrongfully delete the new manifest file should the timestamp be included in the manifest
+        file name.
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            There are four operations which can be affected by a manifest file replacement:
+            \begin{enumerate}
+                \item Chunks being turned into fossils, which will be recovered when necessary since
+                    Theorem~\ref{theorem:nopreviousmanifests} assures the new manifest is considered
+                    for fossil recovery.
+                \item The deletion of the pruned manifest files, which may delete the new manifest
+                    instead of the old one, which is assumed to be acceptable.
+            \end{enumerate}
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            \begin{enumerate}
+                \setcounter{enumi}{2}
+                \item The checking of Policy 3, which will still assure that no new manifest files
+                    can reference existing fossils since in case of it being satisfied each client
+                    had at one point created a manifest file after the fossil collection step ended,
+                    preventing future manifest files from referencing existing fossils.
+                \item The recovery or deletion of fossils, which may wrongfully assume that the
+                    replaced manifest still exists when recovering a fossil.
+                    Since this can only create unreferenced chunks it is assumed to be acceptable.
+            \end{enumerate}
+        \end{proof}
+    \end{frame}
+
     \section{Non-atomic retrieval operation}
     \begin{frame}
         \frametitle{Accessing all archives}
