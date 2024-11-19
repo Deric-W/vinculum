@@ -41,7 +41,7 @@ jobs:
       run: cargo tarpaulin --verbose --all-features --engine llvm --out xml
 
     - name: Upload coverage
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         flags: ${{ runner.os }}
         verbose: true
