@@ -13,3 +13,6 @@ edition = "2021"
 [lib]
 path = "src/lib.rs"
 crate-type = ["lib"]
+
+[dependencies]
+futures = "0.3"
