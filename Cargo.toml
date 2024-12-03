@@ -18,3 +18,12 @@ crate-type = ["lib"]
 futures = "0.3"
 # TODO: consider replacing with std::time::{Duration, SystemTime}
 chrono = "0.4.38"
+tokio = { version = "1", features = ["fs", "io-util", "rt"], optional = true, default-features = false}
+tokio-stream = {version = "0.1.16", features = ["fs"], optional = true, default-features = false}
+tokio-util = {version = "0.7.12", features = ["compat"], optional = true} 
+libc = {version = "0.2.164", optional = true}
+pin-project = {version = "1.1.7", optional = true}
+rand = {version = "0.8.5", optional = true}
+
+[features]
+files = ["dep:tokio", "dep:libc", "dep:tokio-stream", "dep:tokio-util", "dep:pin-project", "dep:rand"]
