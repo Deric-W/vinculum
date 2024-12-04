@@ -3,6 +3,7 @@
 //! This backend uses types from [`tokio::fs`] and therefore depends on it.
 
 use crate::{ChunkBackend, ClientBackend, Repository};
+use crate::utils::{timestamp_from_bytes, timestamp_to_bytes};
 
 use std::iter::Iterator;
 use std::marker::PhantomData;
@@ -534,13 +535,13 @@ impl ManifestBuilder {
         loop {
             match self.state {
                 EncodingState::Idle => {
-                    let timestamp = chrono::Utc::now();
-                    let secs = timestamp.timestamp().to_be_bytes();
-                    let nsecs = timestamp.timestamp_subsec_nanos().to_be_bytes();
-                    let mut buf = [0; 12];
-                    buf[..8].copy_from_slice(&secs);
-                    buf[8..].copy_from_slice(&nsecs);
-                    self.state = EncodingState::TimestampPending(buf, 0);
+                    let timestamp = std::time::SystemTime::now();
+                    match timestamp_to_bytes(timestamp) {
+                        Ok(buf) => {
+                            self.state = EncodingState::TimestampPending(buf, 0);
+                        },
+                        Err(_) => return Poll::Ready(Err(ManifestEncodingError::EncodingError))
+                    }
                     ready!(self.poll_flush_timestamp(cx))?;
                 },
                 EncodingState::ChunkPending(..) => ready!(self.poll_flush_chunk(cx))?,
@@ -753,7 +754,7 @@ where
         &self.creator
     }
 
-    async fn into_metadata(mut self) -> (I, Result<(impl AsyncRead, chrono::DateTime<chrono::Utc>), Self::Error>) {
+    async fn into_metadata(mut self) -> (I, Result<(impl AsyncRead, std::time::SystemTime), Self::Error>) {
         let mut pinned = Pin::new(&mut self);
         loop {
             match pinned.state {
@@ -775,11 +776,9 @@ where
                     let mut buf = [0; 12];
                     match self.reader.read_exact(&mut buf).await {
                         Ok(()) => {
-                            let secs = i64::from_be_bytes(buf[..8].try_into().unwrap());
-                            let nsecs = u32::from_be_bytes(buf[8..].try_into().unwrap());
-                            match chrono::DateTime::from_timestamp(secs, nsecs) {
-                                Some(timestamp) => return (self.creator, Ok((self.reader, timestamp))),
-                                None => return (self.creator, Err(ManifestDecodingError::DecodingError))
+                            match timestamp_from_bytes(buf) {
+                                Ok(timestamp) => return (self.creator, Ok((self.reader, timestamp))),
+                                Err((_, _)) => return (self.creator, Err(ManifestDecodingError::DecodingError))
                             }
                         },
                         Err(e) => return (self.creator, Err(ManifestDecodingError::IoError(e)))

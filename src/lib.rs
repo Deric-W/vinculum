@@ -5,6 +5,7 @@
 //! [paper](https://github.com/gilbertchen/duplicacy/blob/master/duplicacy_paper.pdf).
 
 pub mod backends;
+mod utils;
 
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::stream::Stream;
@@ -132,7 +133,7 @@ pub trait Manifest<I, C>: Stream<Item = Result<C, <Self as Manifest<I, C>>::Erro
     /// 
     /// The timestamp is after all chunks where uploaded but may be before the manifest
     /// upload finished.
-    async fn into_metadata(self) -> (I, Result<(impl AsyncRead, chrono::DateTime<chrono::Utc>), Self::Error>);
+    async fn into_metadata(self) -> (I, Result<(impl AsyncRead, std::time::SystemTime), Self::Error>);
 }
 
 /// Trait representing a manifest creation process with the type of chunk Id as a generic parameter.
