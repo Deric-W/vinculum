@@ -34,15 +34,17 @@ pub struct FileBackend {
 }
 
 impl FileBackend {
-    /// Create an instance from an initialized directory
-    /// and the ID of the client using it.
+    /// Create an instance from an initialized directory.
     /// 
     /// This function assumes the directory was initialized using
     /// [`initialize`] and that no other backends exists for the client
     /// for the duration of its existence.
-    pub fn new(directory: PathBuf) -> FileBackend {
+    pub fn new<P>(directory: P) -> FileBackend
+    where
+        P: AsRef<Path>
+    {
         FileBackend {
-            directory
+            directory: directory.as_ref().to_owned()
         }
     }
 
