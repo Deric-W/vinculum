@@ -69,7 +69,7 @@ pub trait ChunkBackend<C> {
     /// Check whether a chunk exists in the repository.
     /// 
     /// The result of this query may be used to skip uploading chunks which
-    /// already exist in the repository.
+    /// already exist in the repository and may not consider fossils.
     async fn has_chunk(&self, id: &C) -> Result<bool, Self::Error>;
 
     /// Store a chunk in the repository.
