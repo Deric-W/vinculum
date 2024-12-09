@@ -15,7 +15,7 @@ use std::fmt::Debug;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::fs::{DirBuilder, OpenOptions};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::fs::{OpenOptionsExt, DirBuilderExt};
 use std::pin::{pin, Pin};
 use futures::stream::{Stream, StreamExt};
@@ -916,13 +916,14 @@ where
     P: AsRef<Path>
 {
     let fd = OpenOptions::new()
+        .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
         .open(path)?;
-    fsync(fd.as_raw_fd())
+    fsync(fd.as_fd())
 }
 
-fn fsync(fd: RawFd) -> Result<(), IoError> {
-    let res = unsafe { libc::fsync(fd) };
+fn fsync(fd: BorrowedFd<'_>) -> Result<(), IoError> {
+    let res = unsafe { libc::fsync(fd.as_raw_fd()) };
     if res < 0 {
         Err(std::io::Error::last_os_error())
     } else {
