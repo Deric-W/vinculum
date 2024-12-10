@@ -69,8 +69,9 @@ use rand::distributions::{Alphanumeric, DistString};
 /// of chunk ids to [`u8::MAX`] bytes and greater than zero.
 /// 
 /// All numbers are stored in big-endian and therefore portable between architectures.
+#[derive(Debug, Clone)]
 pub struct FileBackend {
-    directory: PathBuf
+    directory: Box<Path>
 }
 
 impl FileBackend {
@@ -84,7 +85,7 @@ impl FileBackend {
         P: AsRef<Path>
     {
         FileBackend {
-            directory: directory.as_ref().to_owned()
+            directory: directory.as_ref().into()
         }
     }
 
@@ -94,7 +95,7 @@ impl FileBackend {
     }
 
     /// Consume this object, returning the directory used for creation.
-    pub fn into_inner(self) -> PathBuf {
+    pub fn into_inner(self) -> Box<Path> {
         self.directory
     }
 
