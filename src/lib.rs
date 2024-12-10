@@ -115,25 +115,76 @@ pub trait ChunkBackend<C> {
     async fn delete_fossil(&self, id: &C) -> Result<(), Self::Error>;
 }
 
-/// Data uploaded by a client, represented as a sequence of chunks.
+/// Data uploaded by a client, represented as a sequence of chunks and additional data.
 /// 
 /// The generic parameters represent the type of client and chunk ids.
-pub trait Manifest<I, C>: Stream<Item = Result<C, <Self as Manifest<I, C>>::Error>> {
+/// 
+/// The process of reading a manifest begins by calling either [`Manifest::into_chunks`]
+/// or [`Manifest::into_referenced_chunks`], depending whether the original data
+/// or dependency information should be retrieved.
+/// 
+/// Should [`Manifest::into_chunks`] be called the additional data stored with
+/// the manifest can be accessed by calling [`ManifestChunks::into_data`], which
+/// will skip any remaning chunks.
+/// 
+/// The returned values of [`ManifestChunks::into_data`] and [`Manifest::into_referenced_chunks`]
+/// both support the extraction of a timestamp recorded after all manifest chunks where uploaded
+/// and all additional data was written, which can be done using the [`ManifestTimestamp::into_timestamp`]
+/// function which will skip any remaining additional data or referenced chunks.
+/// 
+/// The reason for this sequence of operations is to allow implementations the
+/// possibility to stream the manifest which prevents it from needing to be buffered in memory.
+pub trait Manifest<I, C> {
     /// The Type of errors produced by this implementation.
     type Error;
+
+    /// The Type representing the chunks and additional data uploaded by the user.
+    type Chunks: ManifestChunks<C, Error = Self::Error>;
+
+    /// The Type representing the actual chunks referenced by the manifest.
+    /// 
+    /// This can be different from [`Manifest::Chunks`] if for example the actual
+    /// content of the manifest is itself stored in chunks.
+    type ReferencedChunks: Stream<Item = Result<C, Self::Error>> + ManifestTimestamp;
 
     /// Client which created this manifest.
     fn creator(&self) -> &I;
 
-    /// Convert this manifest into its metadata components:
+    /// Read this manifest as the chunks and additional data uploaded by the user.
     /// 
-    ///  - the client which created it
-    ///  - additional data stored on creation
-    ///  - timestamp indicating the time of creation
+    /// This also transfers ownership of the creator id.
+    fn into_chunks(self) -> (I, Self::Chunks);
+
+    /// Read this manifest as the actual chunks referenced by it.
     /// 
-    /// The timestamp is after all chunks where uploaded but may be before the manifest
-    /// upload finished.
-    async fn into_metadata(self) -> (I, Result<(impl AsyncRead, std::time::SystemTime), Self::Error>);
+    /// This also transfers ownership of the creator id.
+    fn into_referenced_chunks(self) -> (I, Self::ReferencedChunks);
+}
+
+/// Sequence of chunks uploaded by a client.
+/// 
+/// The generic parameter represents the chunk ids.
+pub trait ManifestChunks<C>: Stream<Item = Result<C, <Self as ManifestChunks<C>>::Error>> {
+    /// The Type of errors produced by this implementation.
+    type Error;
+
+    /// The Type representing the additional manifest data.
+    type Data: AsyncRead + ManifestTimestamp<Error = Self::Error>;
+
+    /// Continue with reading the additional manifest data uploaded by the client.
+    async fn into_data(self) -> Result<Self::Data, Self::Error>;
+}
+
+/// Final state of the manifest decoding process, producing the timestamp.
+pub trait ManifestTimestamp {
+    /// The Type of errors produced by this implementation.
+    type Error;
+
+    /// Convert this manifest data into its timestamp.
+    /// 
+    /// The timestamp is recorded after all chunks where uploaded and and additional
+    /// data was written, but may be before the manifest upload finished.
+    async fn into_timestamp(self) -> Result<std::time::SystemTime, Self::Error>;
 }
 
 /// Trait representing a manifest creation process with the type of chunk Id as a generic parameter.
@@ -157,7 +208,8 @@ pub trait ManifestBuilder<I>: for<'a> Sink<&'a I, Error = <Self as ManifestBuild
     /// Manifests can store custom data in addition to the sequence of its
     /// chunks, which allows clients to store (for example) additional metadata.
     /// 
-    /// When the returned async write is closed the manifest will be created.
+    /// When the returned async write is closed a timestamp will be recorded
+    /// and the manifest created.
     async fn add_data(self) -> Result<impl AsyncWrite, <Self as ManifestBuilder<I>>::Error>;
 }
 
@@ -185,7 +237,7 @@ pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
     async fn manifests(&self) -> Result<impl Stream<Item = Result<M, <Self as Repository<M, I, C>>::Error>>, <Self as Repository<M, I, C>>::Error>;
 
     /// Request a manifest.
-    async fn manifest(&self, id: &M) -> Result<Self::Manifest, <Self as Repository<M, I, C>>::Error>;
+    async fn manifest(&self, id: &M) -> Result<Self::Manifest, <<Self as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error>;
 
     /// Create a manifest.
     /// 

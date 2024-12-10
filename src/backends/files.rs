@@ -2,12 +2,12 @@
 //! 
 //! This backend uses types from [`tokio::fs`] and therefore depends on it.
 
-use crate::{ChunkBackend, ClientBackend, Repository};
+use crate::{ChunkBackend, ClientBackend, ManifestTimestamp, Repository};
 use crate::utils::{timestamp_from_bytes, timestamp_to_bytes};
 
 use std::iter::Iterator;
 use std::marker::PhantomData;
-use futures::io::{Error as IoError, Result as IoResult, AsyncRead, AsyncWrite};
+use futures::io::{Error as IoError, Result as IoResult, AsyncRead, AsyncWrite, AsyncBufRead};
 use futures::{AsyncReadExt, AsyncWriteExt};
 use tokio_stream::wrappers::ReadDirStream;
 use std::ffi::OsString;
@@ -21,14 +21,54 @@ use std::pin::{pin, Pin};
 use futures::stream::{Stream, StreamExt};
 use futures::sink::Sink;
 use std::task::{ready, Context, Poll};
-use std::future::Future;
+use std::future::{poll_fn, Future};
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use pin_project::pin_project;
 use rand::distributions::{Alphanumeric, DistString};
 
-// TODO: document power loss guarantees, tokio cancellation behaviour and TryInto semantic and manifest format
-// Format: u32 length, creator, (u16 length, chunk)*, 0u16, i64 secs, u32 nsecs, custom (move timestamp + length of custom data to end and use seeking?)
-#[derive(Debug)]
+/// Backend implemented in the local unix filesystem.
+/// 
+/// This backend stores chunks, fossils, clients and manifests using individual
+/// files, performing no compression, encryption or further deduplication.
+/// 
+/// ## Power loss
+///
+/// To be more resistant files are created in a special directory and only moved
+/// into their final position after being closed and fsynced, with the directory
+/// entries of manifests and their chunks being additionally fsynced after the move.
+/// While this prevents incomplete files from being visible to other clients operations
+/// such as creating, recovering and deleting fossils and clients is not synchronized
+/// and can therefore get lost after a power failure.
+///
+/// Furthermore, the way tokio handles task cancellation allows running operations to
+/// complete on its threadpool after their future has been dropped, requiring a shutdown
+/// of the used tokio runtime should a future of this backend be canceled and
+/// other operations happen only after its completion.
+/// 
+/// ## Trait bounds
+/// 
+/// Ids used with this backend will be converted into [`OsString`]s to be used in
+/// file names and may therefore not contain path seperators.
+/// 
+/// The inverse operation may fail, which is interpreted as an corrupted id.
+/// This will cause files to be skipped during enumeration and errors to be produced
+/// when reading a manifest.
+/// 
+/// ## Manifest format
+/// 
+/// The manifest begins with a u8 encoding the length of the byte represention
+/// of the creator id, followed by these bytes.
+/// Next will be a sequence of u8 encoding the length of the byte representation
+/// of a chunk id followed by these bytes until the length is zero.
+/// After that there will be a sequence of u16 encoding the length of a batch of
+/// additional data in bytes, followed by it until the length is zero.
+/// Last there will be the timestamp, stored as seconds and nanoseconds since the
+/// unix epoch.
+/// 
+/// This limits the length of the creator id to [`u8::MAX`] bytes and the length
+/// of chunk ids to [`u8::MAX`] bytes and greater than zero.
+/// 
+/// All numbers are stored in big-endian and therefore portable between architectures.
 pub struct FileBackend {
     directory: PathBuf
 }
@@ -436,7 +476,7 @@ where
     }
 }
 
-// TODO: document size limit
+// TODO: document size limit, use new format
 pub struct ManifestBuilder {
     // since CommitOnClose has unnameable type parameters
     writer: Pin<Box<dyn AsyncWrite>>,
@@ -609,17 +649,26 @@ where
     }
 }
 
+/// Error produced by manifest decoding operations.
 #[derive(Debug)]
 pub enum ManifestDecodingError {
+    /// An I/O error occured.
     IoError(IoError),
-    DecodingError
+    /// The parsing of the creator failed.
+    InvalidCreator,
+    /// The parsing of a chunk failed.
+    InvalidChunk,
+    /// The parsing of the timestamp failed, containing the seconds and nanoseconds since [`std::time::UNIX_EPOCH`].
+    InvalidTimestamp(u64, u32)
 }
 
 impl std::fmt::Display for ManifestDecodingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ManifestDecodingError::IoError(e) => write!(f, "I/O error: {}", e),
-            ManifestDecodingError::DecodingError => write!(f, "decoding error"),
+            ManifestDecodingError::InvalidCreator => write!(f, "invalid creator"),
+            ManifestDecodingError::InvalidChunk => write!(f, "invalid chunk"),
+            ManifestDecodingError::InvalidTimestamp(secs, nsecs) => write!(f, "invalid timestamp (secs: {0}, nsecs: {1}", secs, nsecs)
         }
     }
 }
@@ -628,166 +677,369 @@ impl std::error::Error for ManifestDecodingError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ManifestDecodingError::IoError(e) => e.source(),
-            ManifestDecodingError::DecodingError => None
+            _ => None
         }
     }
 }
 
+/// Decoder of the manifest format used by [`FileBackend`].
 #[derive(Debug)]
 pub struct Manifest<I, C> {
     reader: futures::io::BufReader<Compat<tokio::fs::File>>,
-    buf: Vec<u8>,
-    state: DecodingState,
     creator: I,
+    // to reuse the allocation
+    buf: Vec<u8>,
     phantom: PhantomData<Box<C>>
 }
 
-#[derive(Debug, Clone, Copy)]
-enum DecodingState {
-    Length(u8),
-    Chunk(u16, u16),
-    Finished
+impl<I, C> Manifest<I, C> {
+    fn new(reader: futures::io::BufReader<Compat<tokio::fs::File>>, creator: I, buf: Vec<u8>) -> Manifest<I, C> {
+        Manifest {
+            reader,
+            creator,
+            buf,
+            phantom: PhantomData
+        }
+    }
 }
 
-// TODO: try to remove Unpin bound und replace length in chunk state by vector length
 impl<I, C> Manifest<I, C>
 where
-    for<'a> C: TryFrom<&'a [u8], Error=()>,
-    I: Unpin
+    for<'a> I: TryFrom<&'a [u8], Error=()>,
 {
-    fn poll_length(&mut self, mut read: u8, cx: &mut Context<'_>) -> Poll<Option<Result<u16, ManifestDecodingError>>> {
-        if self.buf.len() < 2 {
-            self.buf.resize(2, 0);
-        }
-        let bytes = &mut self.buf[read as usize..2];
-        loop {
-            match ready!(pin!(&mut self.reader).poll_read(cx, bytes)) {
-                Ok(amount) if read as usize + amount >= 2 => {
-                    let length = u16::from_be_bytes(bytes.try_into().unwrap());
-                    if length == 0 {
-                        self.state = DecodingState::Finished;
-                        return Poll::Ready(None)
-                    } else {
-                        if self.buf.len() < length as usize {
-                            self.buf.resize(length as usize, 0);
-                        }
-                        self.state = DecodingState::Chunk(length, 0);
-                        return Poll::Ready(Some(Ok(length)))
-                    }
-                },
-                Ok(amount) if amount > 0 => {
-                    read += amount as u8;
-                    self.state = DecodingState::Length(read);
-                },
-                Ok(_) => return Poll::Ready(Some(Err(ManifestDecodingError::DecodingError))),
-                Err(e) => return Poll::Ready(Some(Err(ManifestDecodingError::IoError(e))))
-            };
-        }
-    }
-
-    fn poll_chunk(&mut self, length: u16, mut read: u16, cx: &mut Context<'_>) -> Poll<Result<C, ManifestDecodingError>> {
-        let bytes = &mut self.buf[read as usize..length as usize];
-        loop {
-            match ready!(pin!(&mut self.reader).poll_read(cx, bytes)) {
-                Ok(amount) if read as usize + amount >= length as usize => {
-                    self.state = DecodingState::Length(0);
-                    match C::try_from(bytes) {
-                        Ok(chunk) => return Poll::Ready(Ok(chunk)),
-                        Err(_) => return Poll::Ready(Err(ManifestDecodingError::DecodingError))
-                    }
-                },
-                Ok(amount) if amount > 0 => {
-                    read += amount as u16;
-                    self.state = DecodingState::Chunk(length, read);
-                },
-                Ok(_) => return Poll::Ready(Err(ManifestDecodingError::DecodingError)),
-                Err(e) => return Poll::Ready(Err(ManifestDecodingError::IoError(e)))
-            }
-        }
-    }
-
-    fn poll_skip_chunk(mut self: Pin<&mut Self>, length: u16, read: u16, cx: &mut Context<'_>) -> Poll<Result<(), ManifestDecodingError>> {
-        let remaning = length - read;
-        let r = Pin::new(&mut self.as_mut().get_mut().reader);
-        match ready!(r.poll_seek_relative(cx, remaning as i64)) {
-            Ok(()) => {
-                self.state = DecodingState::Length(0);
-                Poll::Ready(Ok(()))
-            },
-            Err(e) => Poll::Ready(Err(ManifestDecodingError::IoError(e)))
-        }
-    }
-}
-
-impl<I, C> Stream for Manifest<I, C>
-where
-    for<'a> C: TryFrom<&'a [u8], Error=()>,
-    I: Unpin
-{
-    type Item = Result<C, ManifestDecodingError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        if let DecodingState::Length(read) = this.state {
-            match ready!(this.poll_length(read, cx)) {
-                Some(Ok(_)) => (),
-                Some(Err(e)) => return Poll::Ready(Some(Err(e))),
-                None => return Poll::Ready(None)
-            }
-        }
-        if let DecodingState::Chunk(length, read) = this.state {
-            match ready!(this.poll_chunk(length, read, cx)) {
-                Ok(chunk) => return Poll::Ready(Some(Ok(chunk))),
-                Err(e) => return Poll::Ready(Some(Err(e)))
-            }
-        }
-        Poll::Ready(None)
+    async fn from_file(mut reader: futures::io::BufReader<Compat<tokio::fs::File>>) -> Result<Manifest<I, C>, ManifestDecodingError> {
+        let mut buf = [0u8; 1];
+        reader.read_exact(&mut buf).await.map_err(|e| ManifestDecodingError::IoError(e))?;
+        let length = u8::from_be_bytes(buf);
+        let mut buf = Vec::new();
+        buf.resize(length.into(), 0);
+        reader.read_exact(buf.as_mut_slice()).await.map_err(|e| ManifestDecodingError::IoError(e))?;
+        let creator = I::try_from(buf.as_slice()).map_err(|_| ManifestDecodingError::InvalidCreator)?;
+        Ok(Manifest::new(reader, creator, buf))
     }
 }
 
 impl<I, C> crate::Manifest<I, C> for Manifest<I, C>
 where
-    for<'a> C: TryFrom<&'a [u8], Error=()>,
-    I: Unpin
+    for<'a> C: TryFrom<&'a [u8], Error=()>
 {
     type Error = ManifestDecodingError;
+
+    type Chunks = ManifestChunks<C>;
+
+    type ReferencedChunks = ManifestChunks<C>;
 
     fn creator(&self) -> &I {
         &self.creator
     }
 
-    async fn into_metadata(mut self) -> (I, Result<(impl AsyncRead, std::time::SystemTime), Self::Error>) {
-        let mut pinned = Pin::new(&mut self);
+    fn into_chunks(self) -> (I, Self::Chunks) {
+        (self.creator, ManifestChunks::new(self.reader, self.buf))
+    }
+
+    fn into_referenced_chunks(self) -> (I, Self::ReferencedChunks) {
+        self.into_chunks()
+    }
+}
+
+/// State of the decoding process of the chunks.
+#[derive(Debug, Clone, Copy)]
+enum ChunksDecodingState {
+    /// Reading a length field of a chunk id, containing the number of bytes already read.
+    ChunkLength(u8),
+    /// Reading a chunk id, containing the number of bytes already read.
+    Chunk(u8),
+    /// Finished decoding process.
+    Finished
+}
+
+/// Implementation of [`crate::Manifest::Chunks`] and [`crate::Manifest::ReferencedChunks`].
+/// 
+/// Since this backend stores data withother further modification the chunks provided
+/// by the client are identical to the chunks referenced by the manifest.
+#[derive(Debug)]
+#[pin_project]
+pub struct ManifestChunks<C> {
+    #[pin]
+    reader: futures::io::BufReader<Compat<tokio::fs::File>>,
+    buf: Vec<u8>,
+    state: ChunksDecodingState,
+    phantom: PhantomData<Box<C>>
+}
+
+impl<C> ManifestChunks<C> {
+    fn new(reader: futures::io::BufReader<Compat<tokio::fs::File>>, mut buf: Vec<u8>) -> ManifestChunks<C> {
+        buf.resize(1, 0);
+        ManifestChunks {
+            reader,
+            buf,
+            state: ChunksDecodingState::ChunkLength(0),
+            phantom: PhantomData
+        }
+    }
+}
+
+impl<C> ManifestChunks<C>
+where
+    for<'a> C: TryFrom<&'a [u8], Error=()>
+{
+    /// Try to transition from [`ChunksDecodingState::ChunkLength`], returning the new state.
+    /// 
+    /// This function assumes the buffer has a length >= 1.
+    fn poll_chunk_length(cx: &mut Context<'_>, reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut Vec<u8>, read: &mut u8) -> Poll<Result<ChunksDecodingState, ManifestDecodingError>> {
+        if *read < 1 {
+            match ready!(reader.poll_read(cx, &mut buf[..1])) {
+                Ok(length) if length > 0 => (),
+                Ok(_) => return Poll::Ready(Err(ManifestDecodingError::IoError(ErrorKind::UnexpectedEof.into()))),
+                Err(e) => return Poll::Ready(Err(ManifestDecodingError::IoError(e)))
+            }
+        }
+        let length = buf[0];
+        if length == 0 {
+            Poll::Ready(Ok(ChunksDecodingState::Finished))
+        } else {
+            buf.resize(length.into(), 0);
+            Poll::Ready(Ok(ChunksDecodingState::Chunk(0)))
+        }
+    }
+
+    /// Try to transition from [`ChunksDecodingState::Chunk`], returning the chunk and new state.
+    /// 
+    /// This function assumes the buffer has a length == length of the chunk.
+    fn poll_chunk(cx: &mut Context<'_>, mut reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut Vec<u8>, read: &mut u8) -> Poll<Result<(C, ChunksDecodingState), ManifestDecodingError>> {
+        while <u8 as Into<usize>>::into(*read) < buf.len() {
+            match ready!(reader.as_mut().poll_read(cx, &mut buf[(*read).into()..])) {
+                Ok(length) if length > 0 => {
+                    *read = *read + length as u8;
+                },
+                Ok(_) => return Poll::Ready(Err(ManifestDecodingError::IoError(ErrorKind::UnexpectedEof.into()))),
+                Err(e) => return Poll::Ready(Err(ManifestDecodingError::IoError(e)))
+            }
+        }
+        let chunk = C::try_from(buf.as_slice()).map_err(|_| ManifestDecodingError::InvalidChunk)?;
+        buf.resize(1, 0);
+        Poll::Ready(Ok((chunk, ChunksDecodingState::ChunkLength(0))))
+    }
+
+    /// Try to transition from [`DecodingState::Chunk`], returning the new state.
+    /// 
+    /// This function assumes the buffer has a length == length of the chunk.
+    fn poll_skip_chunk(cx: &mut Context<'_>, reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut Vec<u8>, read: u8) -> Poll<Result<ChunksDecodingState, ManifestDecodingError>> {
+        if <u8 as Into<usize>>::into(read) < buf.len() {
+            ready!(reader.poll_seek_relative(cx, (buf.len() as u8 - read).into())).map_err(|e| ManifestDecodingError::IoError(e))?;
+        }
+        buf.resize(1, 0);
+        Poll::Ready(Ok(ChunksDecodingState::ChunkLength(0)))
+    }
+}
+
+impl<C> Stream for ManifestChunks<C>
+where
+    for<'a> C: TryFrom<&'a [u8], Error=()>
+{
+    type Item = Result<C, ManifestDecodingError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
         loop {
-            match pinned.state {
-                DecodingState::Length(read) => {
-                    match std::future::poll_fn(|cx| pinned.poll_length(read, cx)).await {
-                        Some(Ok(_)) => (),
-                        Some(Err(e)) => return (self.creator, Err(e)),
-                        None => ()
-                    }
+            match this.state {
+                ChunksDecodingState::ChunkLength(ref mut read) => {
+                    *this.state = ready!(ManifestChunks::<C>::poll_chunk_length(cx, this.reader.as_mut(), this.buf, read))?;
                 },
-                DecodingState::Chunk(length, read) => {
-                    let mut pinned2 = pinned.as_mut();
-                    match std::future::poll_fn(move |cx| pinned2.as_mut().poll_skip_chunk(length, read, cx)).await {
-                        Ok(()) => (),
-                        Err(e) => return (self.creator, Err(e))
-                    }
+                ChunksDecodingState::Chunk(ref mut read) => {
+                    let (chunk, state) = ready!(ManifestChunks::<C>::poll_chunk(cx, this.reader.as_mut(), this.buf, read))?;
+                    *this.state = state;
+                    return Poll::Ready(Some(Ok(chunk)))
                 },
-                DecodingState::Finished => {
-                    let mut buf = [0; 12];
-                    match self.reader.read_exact(&mut buf).await {
-                        Ok(()) => {
-                            match timestamp_from_bytes(buf) {
-                                Ok(timestamp) => return (self.creator, Ok((self.reader, timestamp))),
-                                Err((_, _)) => return (self.creator, Err(ManifestDecodingError::DecodingError))
-                            }
-                        },
-                        Err(e) => return (self.creator, Err(ManifestDecodingError::IoError(e)))
-                    }
+                ChunksDecodingState::Finished => return Poll::Ready(None)
+            }
+        }
+    }
+}
+
+impl<C> crate::ManifestChunks<C> for ManifestChunks<C>
+where
+    for<'a> C: TryFrom<&'a [u8], Error=()>
+{
+    type Error = ManifestDecodingError;
+
+    type Data = ManifestData;
+
+    async fn into_data(mut self) -> Result<Self::Data, Self::Error> {
+        let mut reader = Pin::new(&mut self.reader);
+        loop {
+            match self.state {
+                ChunksDecodingState::ChunkLength(ref mut read) => {
+                    self.state = poll_fn(|cx| ManifestChunks::<C>::poll_chunk_length(cx, reader.as_mut(), &mut self.buf, read)).await?;
+                },
+                ChunksDecodingState::Chunk(read) => {
+                    self.state = poll_fn(|cx| ManifestChunks::<C>::poll_skip_chunk(cx, reader.as_mut(), &mut self.buf, read)).await?;
+                },
+                ChunksDecodingState::Finished => {
+                    return Ok(ManifestData::new(self.reader))
                 }
             }
         }
+    }
+}
+
+/// State of the decoding process of the data.
+#[derive(Debug, Clone, Copy)]
+enum DataDecodingState {
+    /// Reading a length field of a data batch, containing the number of bytes already read.
+    DataLength(u8),
+    /// Reading a data batch, containing the number of bytes remanining.
+    Data(u16),
+    /// Reading a timestamp, containing the number of bytes already read.
+    Timestamp(u8)
+}
+
+/// Implementation of [`crate::ManifestChunks::Data`].
+#[derive(Debug)]
+#[pin_project]
+pub struct ManifestData {
+    #[pin]
+    reader: futures::io::BufReader<Compat<tokio::fs::File>>,
+    state: DataDecodingState,
+    buf: [u8; 12]
+}
+
+impl ManifestData {
+    fn new(reader: futures::io::BufReader<Compat<tokio::fs::File>>) -> ManifestData {
+        ManifestData {
+            reader,
+            state: DataDecodingState::DataLength(0),
+            buf: [0; 12]
+                    }
+    }
+
+    /// Try to transition from [`DataDecodingState::DataLength`], returning the new state.
+    fn poll_data_length(cx: &mut Context<'_>, mut reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut [u8; 12], read: &mut u8) -> Poll<Result<DataDecodingState, IoError>> {
+        while (*read) < 2 {
+            match ready!(reader.as_mut().poll_read(cx, &mut buf[(*read).into()..2])) {
+                Ok(length) if length > 0 => {
+                    *read = *read + length as u8;
+                },
+                Ok(_) => return Poll::Ready(Err(ErrorKind::UnexpectedEof.into())),
+                Err(e) => return Poll::Ready(Err(e))
+            }
+        }
+        let length = u16::from_be_bytes(buf[..2].try_into().unwrap());
+        if length == 0 {
+            Poll::Ready(Ok(DataDecodingState::Timestamp(0)))
+        } else {
+            Poll::Ready(Ok(DataDecodingState::Data(0)))
+        }
+    }
+
+    /// Try to transition from [`DataDecodingState::Data`], returning the amount of data read and the new state.
+    fn poll_data(cx: &mut Context<'_>, mut reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, remaining: &mut u16, requested: &mut [u8]) -> Poll<Result<(usize, DataDecodingState), IoError>> {
+        if requested.len() == 0 {
+            return Poll::Ready(Ok((0, DataDecodingState::Data(*remaining))))
+        }
+        if *remaining > 0 {
+            match ready!(reader.as_mut().poll_fill_buf(cx)) {
+                Ok(data) if data.len() > 0 => {
+                    let read_data = std::cmp::min((*remaining).into(), data.len());
+                    let consumed_data = std::cmp::min(read_data, requested.len());
+                    *remaining = *remaining - consumed_data as u16;
+                    requested[..consumed_data].copy_from_slice(&data[..consumed_data]);
+                    reader.consume(consumed_data);
+                    if *remaining > 0 {
+                        return Poll::Ready(Ok((consumed_data, DataDecodingState::Data(*remaining))))
+                    } else {
+                        return Poll::Ready(Ok((consumed_data, DataDecodingState::DataLength(0))))
+                    }
+                },
+                Ok(_) => return Poll::Ready(Err(ErrorKind::UnexpectedEof.into())),
+                Err(e) => return Poll::Ready(Err(e))
+            }
+        }
+        Poll::Ready(Ok((0, DataDecodingState::DataLength(0))))
+    }
+
+    /// Try to transition from [`DataDecodingState::Data`], returning the new state.
+    fn poll_skip_data(cx: &mut Context<'_>, reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, remaining: u16) -> Poll<Result<DataDecodingState, IoError>> {
+        if remaining > 0 {
+            ready!(reader.poll_seek_relative(cx, remaining.into()))?;
+        }
+        Poll::Ready(Ok(DataDecodingState::DataLength(0)))
+    }
+
+    /// Try to transition from [`DataDecodingState::Timestamp`], returning the timestamp.
+    /// 
+    /// This function assumes the buffer has a length >= 12.
+    fn poll_timestamp(cx: &mut Context<'_>, mut reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut [u8; 12], read: &mut u8) -> Poll<Result<std::time::SystemTime, ManifestDecodingError>> {
+        while (*read) < 12 {
+            match ready!(reader.as_mut().poll_read(cx, &mut buf[(*read).into()..12])) {
+                Ok(length) if length > 0 => {
+                    *read = *read + length as u8;
+                },
+                Ok(_) => return Poll::Ready(Err(ManifestDecodingError::IoError(ErrorKind::UnexpectedEof.into()))),
+                Err(e) => return Poll::Ready(Err(ManifestDecodingError::IoError(e)))
+            }
+        }
+        match timestamp_from_bytes(buf.as_slice().try_into().unwrap()) {
+            Ok(timestamp) => Poll::Ready(Ok(timestamp)),
+            Err((secs, nsecs)) => Poll::Ready(Err(ManifestDecodingError::InvalidTimestamp(secs, nsecs)))
+        }
+    }
+}
+
+impl AsyncRead for ManifestData {
+    fn poll_read(
+                self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                buf: &mut [u8],
+            ) -> Poll<IoResult<usize>> {
+        let mut this = self.project();
+        loop {
+            match this.state {
+                DataDecodingState::DataLength(ref mut read) => {
+                    *this.state = ready!(ManifestData::poll_data_length(cx, this.reader.as_mut(), this.buf, read))?;
+                },
+                DataDecodingState::Data(ref mut remaining) => {
+                    let (read, state) = ready!(ManifestData::poll_data(cx, this.reader.as_mut(), remaining, buf))?;
+                    *this.state = state;
+                    return Poll::Ready(Ok(read))
+                },
+                DataDecodingState::Timestamp(_) => return Poll::Ready(Ok(0))
+            }
+        }
+    }
+}
+
+impl ManifestTimestamp for ManifestData {
+    type Error = ManifestDecodingError;
+
+    async fn into_timestamp(mut self) -> Result<std::time::SystemTime, Self::Error> {
+        let mut reader = pin!(self.reader);
+        loop {
+            match self.state {
+                DataDecodingState::DataLength(ref mut read) => {
+                    self.state = poll_fn(|cx| ManifestData::poll_data_length(cx, reader.as_mut(), &mut self.buf, read)).await.map_err(|e| ManifestDecodingError::IoError(e))?;
+                },
+                DataDecodingState::Data(remaining) => {
+                    self.state = poll_fn(|cx| ManifestData::poll_skip_data(cx, reader.as_mut(), remaining)).await.map_err(|e| ManifestDecodingError::IoError(e))?;
+                        },
+                DataDecodingState::Timestamp(ref mut read) => {
+                    let timestamp = poll_fn(|cx| ManifestData::poll_timestamp(cx, reader.as_mut(), &mut self.buf, read)).await?;
+                    return Ok(timestamp);
+                }
+            }
+        }
+    }
+}
+
+impl<C> crate::ManifestTimestamp for ManifestChunks<C>
+where
+    for<'a> C: TryFrom<&'a [u8], Error=()>
+{
+    type Error = ManifestDecodingError;
+
+    async fn into_timestamp(self) -> Result<std::time::SystemTime, Self::Error> {
+        let data = <ManifestChunks<C> as crate::ManifestChunks<C>>::into_data(self).await?;
+        data.into_timestamp().await
     }
 }
 
@@ -798,8 +1050,7 @@ where
     for<'a> C: TryFrom<&'a [u8], Error=()>,
     for<'a> &'a C: Into<OsString>,
     for<'a> M: TryFrom<&'a [u8], Error=()>,
-    for<'a> &'a M: Into<OsString>,
-    I: Unpin
+    for<'a> &'a M: Into<OsString>
 {
     type Error = IoError;
 
@@ -811,30 +1062,13 @@ where
         self.list_directory("manifests").await
     }
 
-    async fn manifest(&self, id: &M) -> Result<Self::Manifest, <Self as Repository<M, I, C>>::Error> {
+    async fn manifest(&self, id: &M) -> Result<Self::Manifest, ManifestDecodingError> {
         let mut buf = self.directory().to_owned();
         buf.push("manifests");
         buf.push(id.into());
-        let file = tokio::fs::File::open(buf).await?;
-        let mut reader = futures::io::BufReader::new(file.compat());
-        let mut buf = [0; 4];
-        reader.read_exact(&mut buf).await?;
-        let length = u32::from_be_bytes(buf);
-        let mut buf = Vec::new();
-        buf.resize(length as usize, 0);
-        reader.read_exact(buf.as_mut_slice()).await?;
-        let creator = match I::try_from(buf.as_slice()) {
-            Ok(i) => Ok(i),
-            Err(()) => Err(IoError::new(ErrorKind::Other, "parsing creator failed"))
-        }?;
-        buf.resize(0, 0);
-        Ok(Manifest {
-            reader,
-            buf,
-            state: DecodingState::Length(0),
-            creator,
-            phantom: PhantomData
-        })
+        let file = tokio::fs::File::open(buf).await.map_err(|e|  ManifestDecodingError::IoError(e))?;
+        let reader = futures::io::BufReader::new(file.compat());
+        Manifest::from_file(reader).await
     }
 
     // TODO: better handling of oversized client ids, better encoding / decoding errors in general (try to not use as)
