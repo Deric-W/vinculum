@@ -929,7 +929,7 @@ impl ManifestData {
         if length == 0 {
             Poll::Ready(Ok(DataDecodingState::Timestamp(0)))
         } else {
-            Poll::Ready(Ok(DataDecodingState::Data(0)))
+            Poll::Ready(Ok(DataDecodingState::Data(length)))
         }
     }
 
