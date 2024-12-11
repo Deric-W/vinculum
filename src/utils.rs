@@ -1,4 +1,4 @@
-//! Internal utilities used by this crate.
+//! Utilities for creating custom backends.
 
 use std::time::{SystemTime, SystemTimeError, Duration, UNIX_EPOCH};
 
@@ -15,7 +15,8 @@ pub fn timestamp_to_bytes(timestamp: SystemTime) -> Result<[u8; 12], SystemTimeE
 
 /// Inverse of [`timestamp_to_bytes`].
 /// 
-/// This function produces an error should the timestamp be out of bounds.
+/// This function produces an error should the timestamp be out of bounds
+/// containing the parsed seconds and nanoseconds since [`UNIX_EPOCH`].
 pub fn timestamp_from_bytes(buffer: [u8; 12]) -> Result<SystemTime, (u64, u32)> {
     let secs = u64::from_be_bytes(buffer[..8].try_into().unwrap());
     let nsecs = u32::from_be_bytes(buffer[8..].try_into().unwrap());

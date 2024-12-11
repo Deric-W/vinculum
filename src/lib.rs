@@ -5,7 +5,7 @@
 //! [paper](https://github.com/gilbertchen/duplicacy/blob/master/duplicacy_paper.pdf).
 
 pub mod backends;
-mod utils;
+pub mod utils;
 
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::stream::Stream;
