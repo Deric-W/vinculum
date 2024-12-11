@@ -11,7 +11,9 @@ mod initialization;
 mod uploading;
 mod clients;
 mod chunks;
+mod manifests;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ID {
     inner: [u8; 32],
 }
