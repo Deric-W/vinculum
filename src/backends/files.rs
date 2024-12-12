@@ -689,12 +689,13 @@ pub struct Manifest<I, C> {
     reader: futures::io::BufReader<Compat<tokio::fs::File>>,
     creator: I,
     // to reuse the allocation
-    buf: Vec<u8>,
+    buf: Box<[u8]>,
     phantom: PhantomData<Box<C>>
 }
 
 impl<I, C> Manifest<I, C> {
-    fn new(reader: futures::io::BufReader<Compat<tokio::fs::File>>, creator: I, buf: Vec<u8>) -> Manifest<I, C> {
+    /// Expects buf.len() >= u8::MAX
+    fn new(reader: futures::io::BufReader<Compat<tokio::fs::File>>, creator: I, buf: Box<[u8]>) -> Manifest<I, C> {
         Manifest {
             reader,
             creator,
@@ -712,10 +713,10 @@ where
         let mut buf = [0u8; 1];
         reader.read_exact(&mut buf).await.map_err(|e| ManifestDecodingError::IoError(e))?;
         let length = u8::from_be_bytes(buf);
-        let mut buf = Vec::new();
-        buf.resize(length.into(), 0);
-        reader.read_exact(buf.as_mut_slice()).await.map_err(|e| ManifestDecodingError::IoError(e))?;
-        let creator = I::try_from(buf.as_slice()).map_err(|_| ManifestDecodingError::InvalidCreator)?;
+        let mut buf = vec![0; u8::MAX.into()].into_boxed_slice();
+        let creator_buf = &mut buf[..length.into()];
+        reader.read_exact(creator_buf).await.map_err(|e| ManifestDecodingError::IoError(e))?;
+        let creator = I::try_from(creator_buf).map_err(|_| ManifestDecodingError::InvalidCreator)?;
         Ok(Manifest::new(reader, creator, buf))
     }
 }
@@ -748,8 +749,8 @@ where
 enum ChunksDecodingState {
     /// Reading a length field of a chunk id, containing the number of bytes already read.
     ChunkLength(u8),
-    /// Reading a chunk id, containing the number of bytes already read.
-    Chunk(u8),
+    /// Reading a chunk id, containing the number of bytes already read and total length.
+    Chunk(u8, u8),
     /// Finished decoding process.
     Finished
 }
@@ -763,14 +764,14 @@ enum ChunksDecodingState {
 pub struct ManifestChunks<C> {
     #[pin]
     reader: futures::io::BufReader<Compat<tokio::fs::File>>,
-    buf: Vec<u8>,
+    buf: Box<[u8]>,
     state: ChunksDecodingState,
     phantom: PhantomData<Box<C>>
 }
 
 impl<C> ManifestChunks<C> {
-    fn new(reader: futures::io::BufReader<Compat<tokio::fs::File>>, mut buf: Vec<u8>) -> ManifestChunks<C> {
-        buf.resize(1, 0);
+    /// Expects buf.len() >= u8::MAX
+    fn new(reader: futures::io::BufReader<Compat<tokio::fs::File>>, buf: Box<[u8]>) -> ManifestChunks<C> {
         ManifestChunks {
             reader,
             buf,
@@ -785,9 +786,7 @@ where
     for<'a> C: TryFrom<&'a [u8], Error=()>
 {
     /// Try to transition from [`ChunksDecodingState::ChunkLength`], returning the new state.
-    /// 
-    /// This function assumes the buffer has a length >= 1.
-    fn poll_chunk_length(cx: &mut Context<'_>, reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut Vec<u8>, read: &mut u8) -> Poll<Result<ChunksDecodingState, ManifestDecodingError>> {
+    fn poll_chunk_length(cx: &mut Context<'_>, reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut [u8], read: &mut u8) -> Poll<Result<ChunksDecodingState, ManifestDecodingError>> {
         if *read < 1 {
             match ready!(reader.poll_read(cx, &mut buf[..1])) {
                 Ok(length) if length > 0 => (),
@@ -799,17 +798,15 @@ where
         if length == 0 {
             Poll::Ready(Ok(ChunksDecodingState::Finished))
         } else {
-            buf.resize(length.into(), 0);
-            Poll::Ready(Ok(ChunksDecodingState::Chunk(0)))
+            Poll::Ready(Ok(ChunksDecodingState::Chunk(0, length)))
         }
     }
 
     /// Try to transition from [`ChunksDecodingState::Chunk`], returning the chunk and new state.
-    /// 
-    /// This function assumes the buffer has a length == length of the chunk.
-    fn poll_chunk(cx: &mut Context<'_>, mut reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut Vec<u8>, read: &mut u8) -> Poll<Result<(C, ChunksDecodingState), ManifestDecodingError>> {
-        while <u8 as Into<usize>>::into(*read) < buf.len() {
-            match ready!(reader.as_mut().poll_read(cx, &mut buf[(*read).into()..])) {
+    fn poll_chunk(cx: &mut Context<'_>, mut reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut [u8], read: &mut u8, length: u8) -> Poll<Result<(C, ChunksDecodingState), ManifestDecodingError>> {
+        let bytes = &mut buf[..length.into()];
+        while *read < length {
+            match ready!(reader.as_mut().poll_read(cx, &mut bytes[(*read).into()..])) {
                 Ok(length) if length > 0 => {
                     *read = *read + length as u8;
                 },
@@ -817,19 +814,17 @@ where
                 Err(e) => return Poll::Ready(Err(ManifestDecodingError::IoError(e)))
             }
         }
-        let chunk = C::try_from(buf.as_slice()).map_err(|_| ManifestDecodingError::InvalidChunk)?;
-        buf.resize(1, 0);
+        let chunk = C::try_from(bytes).map_err(|_| ManifestDecodingError::InvalidChunk)?;
         Poll::Ready(Ok((chunk, ChunksDecodingState::ChunkLength(0))))
     }
 
     /// Try to transition from [`DecodingState::Chunk`], returning the new state.
     /// 
     /// This function assumes the buffer has a length == length of the chunk.
-    fn poll_skip_chunk(cx: &mut Context<'_>, reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, buf: &mut Vec<u8>, read: u8) -> Poll<Result<ChunksDecodingState, ManifestDecodingError>> {
-        if <u8 as Into<usize>>::into(read) < buf.len() {
-            ready!(reader.poll_seek_relative(cx, (buf.len() as u8 - read).into())).map_err(|e| ManifestDecodingError::IoError(e))?;
+    fn poll_skip_chunk(cx: &mut Context<'_>, reader: Pin<&mut futures::io::BufReader<Compat<tokio::fs::File>>>, read: u8, length: u8) -> Poll<Result<ChunksDecodingState, ManifestDecodingError>> {
+        if read < length {
+            ready!(reader.poll_seek_relative(cx, (length - read).into())).map_err(|e| ManifestDecodingError::IoError(e))?;
         }
-        buf.resize(1, 0);
         Poll::Ready(Ok(ChunksDecodingState::ChunkLength(0)))
     }
 }
@@ -847,8 +842,8 @@ where
                 ChunksDecodingState::ChunkLength(ref mut read) => {
                     *this.state = ready!(ManifestChunks::<C>::poll_chunk_length(cx, this.reader.as_mut(), this.buf, read))?;
                 },
-                ChunksDecodingState::Chunk(ref mut read) => {
-                    let (chunk, state) = ready!(ManifestChunks::<C>::poll_chunk(cx, this.reader.as_mut(), this.buf, read))?;
+                ChunksDecodingState::Chunk(ref mut read, length) => {
+                    let (chunk, state) = ready!(ManifestChunks::<C>::poll_chunk(cx, this.reader.as_mut(), this.buf, read, *length))?;
                     *this.state = state;
                     return Poll::Ready(Some(Ok(chunk)))
                 },
@@ -873,8 +868,8 @@ where
                 ChunksDecodingState::ChunkLength(ref mut read) => {
                     self.state = poll_fn(|cx| ManifestChunks::<C>::poll_chunk_length(cx, reader.as_mut(), &mut self.buf, read)).await?;
                 },
-                ChunksDecodingState::Chunk(read) => {
-                    self.state = poll_fn(|cx| ManifestChunks::<C>::poll_skip_chunk(cx, reader.as_mut(), &mut self.buf, read)).await?;
+                ChunksDecodingState::Chunk(read, length) => {
+                    self.state = poll_fn(|cx| ManifestChunks::<C>::poll_skip_chunk(cx, reader.as_mut(), read, length)).await?;
                 },
                 ChunksDecodingState::Finished => {
                     return Ok(ManifestData::new(self.reader))
