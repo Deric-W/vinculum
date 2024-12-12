@@ -34,6 +34,36 @@ impl Into<OsString> for &EmptyID {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BigID {
+    inner: [u8; u8::MAX as usize / 2]
+}
+
+impl TryFrom<&[u8]> for BigID {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let filler: u8 = 'x'.try_into().unwrap();
+        if matches!(value.get((u8::MAX - 1) as usize), Some(b) if *b == filler) {
+            let mut buf = [0; u8::MAX as usize / 2];
+            match hex::decode_to_slice(&value[..(u8::MAX - 1) as usize], &mut buf) {
+                Ok(()) => Ok(BigID { inner: buf }),
+                Err(_) => Err(()),
+            }
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl Into<OsString> for &BigID {
+    fn into(self) -> OsString {
+        let mut hexbytes = hex::encode(self.inner);
+        hexbytes.push('x');
+        hexbytes.into()
+    }
+}
+
 
 fn create_repository_with_manifest(tmpdir: &Path, id: &ID, content: &[u8]) -> files::FileBackend {
     let backend = create_repository(tmpdir);
@@ -352,4 +382,27 @@ async fn referenced_chunks_equal_to_chunks() {
     let chunks2: Vec<ID> = manifest2.into_chunks().1.map(|r| r.unwrap()).collect().await;
 
     assert_eq!(chunks1, chunks2);
+}
+
+#[tokio::test]
+async fn read_limits() {
+    let tmpdir = tempdir().unwrap();
+    let id = ID { inner: [0; 32] };
+    let creator = BigID { inner: [1; u8::MAX as usize / 2] };
+    let chunk = BigID { inner: [2; u8::MAX as usize / 2] };
+    let mut content: Vec<u8> = Vec::with_capacity(527);
+    content.push(u8::MAX);
+    content.extend_from_slice(<&BigID as Into<OsString>>::into(&creator).as_encoded_bytes());
+    content.push(u8::MAX);
+    content.extend_from_slice(<&BigID as Into<OsString>>::into(&chunk).as_encoded_bytes());
+    content.push(0);
+    content.extend_from_slice(&0u16.to_be_bytes());
+    content.extend_from_slice(&[0; 12]);
+    let backend = create_repository_with_manifest(tmpdir.path(), &id, &content);
+    let manifest = <files::FileBackend as Repository<ID, BigID, BigID>>::manifest(&backend, &id).await.unwrap();
+    let (manifest_creator, mut chunks_stream) = manifest.into_chunks();
+    let chunks: Vec<BigID> = Pin::new(&mut chunks_stream).map(|r| r.unwrap()).collect().await;
+
+    assert_eq!(manifest_creator, creator);
+    assert_eq!(chunks.as_slice(), &[chunk]);
 }
