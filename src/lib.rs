@@ -199,9 +199,12 @@ pub trait ManifestTimestamp {
 /// The manifest will be created when the builder or the [`AsyncWrite`] instance
 /// returned by [`ManifestBuilder<I>.add_data`] is closed, trying to add additional
 /// data after closing will result in errors.
-pub trait ManifestBuilder<I>: for<'a> Sink<&'a I, Error = <Self as ManifestBuilder<I>>::Error> {
+pub trait ManifestBuilder<C>: for<'a> Sink<&'a C, Error = <Self as ManifestBuilder<C>>::Error> {
     /// The Type of errors produced by this implementation.
     type Error;
+
+    /// The Type representing additional manifest data.
+    type Data: AsyncWrite;
 
     /// Add additional data to the manifest.
     /// 
@@ -210,7 +213,7 @@ pub trait ManifestBuilder<I>: for<'a> Sink<&'a I, Error = <Self as ManifestBuild
     /// 
     /// When the returned async write is closed a timestamp will be recorded
     /// and the manifest created.
-    async fn add_data(self) -> Result<impl AsyncWrite, <Self as ManifestBuilder<I>>::Error>;
+    async fn add_data(self) -> Result<Self::Data, <Self as ManifestBuilder<C>>::Error>;
 }
 
 /// A repository storing clients, chunks and manifests.
@@ -244,7 +247,7 @@ pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
     /// A client creating a manifest while the same client is downloading a
     /// chunk can cause the download to fail by making it appear as if the
     /// chunk does not exist.
-    async fn create_manifest(&self, id: &M, client: &I) -> Result<Self::Builder, <Self as Repository<M, I, C>>::Error>;
+    async fn create_manifest(&self, id: &M, client: &I) -> Result<Self::Builder, <<Self as Repository<M, I, C>>::Builder as ManifestBuilder<C>>::Error>;
 
     /// Remove a manifest.
     /// 
