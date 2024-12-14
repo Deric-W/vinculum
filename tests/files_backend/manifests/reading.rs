@@ -1,69 +1,18 @@
 //! Tests for reading manifest files
 
+use super::{BigID, EmptyID};
+use crate::files_backend::{create_repository, ID};
+use futures::io::{AsyncRead, AsyncReadExt};
+use futures::stream::StreamExt;
+use std::ffi::OsString;
 use std::future::poll_fn;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::ffi::OsString;
-use futures::stream::StreamExt;
-use futures::io::{AsyncRead, AsyncReadExt};
 use std::pin::{pin, Pin};
-use crate::files_backend::{ID, create_repository};
-use vinculum::{Repository, Manifest, ManifestChunks, ManifestTimestamp};
+use tempfile::tempdir;
 use vinculum::backends::files;
 use vinculum::utils::timestamp_to_bytes;
-use tempfile::tempdir;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct EmptyID;
-
-impl TryFrom<&[u8]> for EmptyID {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() == 0 {
-            Ok(EmptyID { })
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl Into<OsString> for &EmptyID {
-    fn into(self) -> OsString {
-        "".into()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BigID {
-    inner: [u8; u8::MAX as usize / 2]
-}
-
-impl TryFrom<&[u8]> for BigID {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let filler: u8 = 'x'.try_into().unwrap();
-        if matches!(value.get((u8::MAX - 1) as usize), Some(b) if *b == filler) {
-            let mut buf = [0; u8::MAX as usize / 2];
-            match hex::decode_to_slice(&value[..(u8::MAX - 1) as usize], &mut buf) {
-                Ok(()) => Ok(BigID { inner: buf }),
-                Err(_) => Err(()),
-            }
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl Into<OsString> for &BigID {
-    fn into(self) -> OsString {
-        let mut hexbytes = hex::encode(self.inner);
-        hexbytes.push('x');
-        hexbytes.into()
-    }
-}
-
+use vinculum::{Manifest, ManifestChunks, ManifestTimestamp, Repository};
 
 fn create_repository_with_manifest(tmpdir: &Path, id: &ID, content: &[u8]) -> files::FileBackend {
     let backend = create_repository(tmpdir);
