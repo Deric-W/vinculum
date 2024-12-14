@@ -36,6 +36,27 @@ impl Into<OsString> for &ID {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EmptyID;
+
+impl TryFrom<&[u8]> for EmptyID {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() == 0 {
+            Ok(EmptyID {})
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl Into<OsString> for &EmptyID {
+    fn into(self) -> OsString {
+        "".into()
+    }
+}
+
 #[pin_project]
 struct PollOnce<F> {
     #[pin]

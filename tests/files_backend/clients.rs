@@ -1,6 +1,6 @@
 //! Tests for the clients
 
-use super::{create_repository, ID};
+use super::{create_repository, EmptyID, ID};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::stream::StreamExt;
 use std::ffi::OsString;
@@ -121,4 +121,19 @@ async fn remove_clients() {
     assert!(
         matches!( <files::FileBackend as ClientBackend<ID>>::remove_client(&backend, &id).await, Err(e) if e.kind() == ErrorKind::NotFound)
     );
+}
+
+#[tokio::test]
+async fn reject_empty_client_id() {
+    let tmpdir = tempdir().unwrap();
+    let backend = create_repository(tmpdir.path());
+
+    let res = <files::FileBackend as ClientBackend<EmptyID>>::add_client(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as ClientBackend<EmptyID>>::client(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as ClientBackend<EmptyID>>::remove_client(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 }

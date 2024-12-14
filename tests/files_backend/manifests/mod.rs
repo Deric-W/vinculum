@@ -1,6 +1,6 @@
 //! Tests for reading and writing manifests
 
-use crate::files_backend::{create_repository, ID};
+use crate::files_backend::{create_repository, EmptyID, ID};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
@@ -13,27 +13,6 @@ use vinculum::{Manifest, ManifestBuilder, ManifestChunks, ManifestTimestamp, Rep
 
 mod reading;
 mod writing;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct EmptyID;
-
-impl TryFrom<&[u8]> for EmptyID {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() == 0 {
-            Ok(EmptyID {})
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl Into<OsString> for &EmptyID {
-    fn into(self) -> OsString {
-        "".into()
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BigID {
@@ -184,4 +163,19 @@ async fn is_round_trip() {
     assert_eq!(data.as_slice(), &[1, 2, 3, 4, 5, 6]);
     assert!(manifest_timestamp >= before);
     assert!(manifest_timestamp <= after);
+}
+
+#[tokio::test]
+async fn reject_empty_manifest_id() {
+    let tmpdir = tempdir().unwrap();
+    let backend = create_repository(tmpdir.path());
+
+    let res = <files::FileBackend as Repository<EmptyID, ID, ID>>::manifest(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(files::ManifestDecodingError::IoError(e)) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as Repository<EmptyID, ID, ID>>::create_manifest(&backend, &EmptyID, &ID { inner: [1; 32] }).await;
+    assert!(matches!(res, Err(files::ManifestEncodingError::IoError(e)) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as Repository<EmptyID, ID, ID>>::remove_manifest(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 }

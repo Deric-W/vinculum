@@ -1,6 +1,6 @@
 //! Tests for the chunks
 
-use super::{create_repository, ID};
+use super::{create_repository, EmptyID, ID};
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::stream::StreamExt;
 use std::ffi::OsString;
@@ -252,4 +252,28 @@ async fn delete_fossils() {
     <files::FileBackend as ChunkBackend<ID>>::delete_fossil(&backend, &id)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn reject_empty_chunk_id() {
+    let tmpdir = tempdir().unwrap();
+    let backend = create_repository(tmpdir.path());
+
+    let res = <files::FileBackend as ChunkBackend<EmptyID>>::add_chunk(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as ChunkBackend<EmptyID>>::has_chunk(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as ChunkBackend<EmptyID>>::chunk(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as ChunkBackend<EmptyID>>::make_fossil(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as ChunkBackend<EmptyID>>::recover_fossil(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
+
+    let res = <files::FileBackend as ChunkBackend<EmptyID>>::delete_fossil(&backend, &EmptyID).await;
+    assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 }

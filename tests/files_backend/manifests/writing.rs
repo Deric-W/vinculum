@@ -1,7 +1,7 @@
 //! Tests for writing manifest files
 
-use super::{BigID, EmptyID, SmallID};
-use crate::files_backend::{create_repository, ID};
+use super::{BigID, SmallID};
+use crate::files_backend::{create_repository, EmptyID, ID};
 use futures::io::AsyncWriteExt;
 use futures::sink::{Sink, SinkExt};
 use std::ffi::OsString;

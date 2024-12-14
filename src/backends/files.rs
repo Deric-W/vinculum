@@ -163,6 +163,24 @@ impl FileBackend {
         }));
         Ok(ids)
     }
+
+    fn create_path_from_id<P, I>(&self, subdirectory: P, id: &I) -> IoResult<PathBuf>
+    where
+        P: AsRef<Path>,
+        for<'a> &'a I: Into<OsString>
+    {
+        let string = id.into();
+        if string.len() == 0 {
+            Err(IoError::other("received id with length zero"))
+        } else {
+            let mut buf = self.directory().to_path_buf();
+            buf.push(subdirectory);
+            buf.push(string);
+            Ok(buf)
+        }
+
+
+    }
 }
 
 async fn commit_file(file: RemoveOnDrop, to: PathBuf) -> IoResult<()> {
@@ -360,25 +378,19 @@ where
     }
 
     async fn client(&self, id: &I) -> IoResult<impl AsyncRead> {
-        let mut buf = self.directory().to_owned();
-        buf.push("clients");
-        buf.push(id.into());
-        let file = tokio::fs::File::open(buf).await?;
+        let path = self.create_path_from_id("clients", id)?;
+        let file = tokio::fs::File::open(path).await?;
         Ok(tokio::io::BufReader::new(file).compat())
     }
 
     async fn add_client(&self, id: &I) -> IoResult<impl AsyncWrite> {
-        let mut buf = self.directory().to_owned();
-        buf.push("clients");
-        buf.push(id.into());
-        self.upload(buf).await
+        let path = self.create_path_from_id("clients", id)?;
+        self.upload(path).await
     }
 
     async fn remove_client(&self, id: &I) -> IoResult<()> {
-        let mut buf = self.directory().to_owned();
-        buf.push("clients");
-        buf.push(id.into());
-        tokio::fs::remove_file(buf).await
+        let path = self.create_path_from_id("clients", id)?;
+        tokio::fs::remove_file(path).await
     }
 }
 
@@ -396,6 +408,9 @@ where
     async fn chunk(&self, id: &C) -> IoResult<impl AsyncRead> {
         let mut buf = self.directory().to_owned();
         let file_name = id.into();
+        if file_name.len() == 0 {
+            return Err(IoError::other("received id with length zero"))
+        }
         for _ in 0..2 {
             buf.push("chunks");
             buf.push(&file_name);
@@ -418,17 +433,13 @@ where
     }
 
     async fn has_chunk(&self, id: &C) -> IoResult<bool> {
-        let mut buf = self.directory().to_owned();
-        buf.push("chunks");
-        buf.push(id.into());
-        tokio::fs::try_exists(buf).await
+        let path = self.create_path_from_id("chunks", id)?;
+        tokio::fs::try_exists(path).await
     }
 
     async fn add_chunk(&self, id: &C) -> IoResult<impl AsyncWrite> {
-        let mut buf = self.directory().to_owned();
-        buf.push("chunks");
-        buf.push(id.into());
-        self.upload(buf).await
+        let path = self.create_path_from_id("chunks", id)?;
+        self.upload(path).await
     }
 
     async fn fossils(&self) -> IoResult<impl Stream<Item = IoResult<C>>> {
@@ -437,6 +448,9 @@ where
 
     async fn make_fossil(&self, id: &C) -> IoResult<()> {
         let file_name = id.into();
+        if file_name.len() == 0 {
+            return Err(IoError::other("received id with length zero"))
+        }
         let mut from = self.directory().to_owned();
         from.push("chunks");
         from.push(&file_name);
@@ -452,6 +466,9 @@ where
 
     async fn recover_fossil(&self, id: &C) -> IoResult<()> {
         let file_name = id.into();
+        if file_name.len() == 0 {
+            return Err(IoError::other("received id with length zero"))
+        }
         let mut from = self.directory().to_owned();
         from.push("fossils");
         from.push(&file_name);
@@ -466,10 +483,8 @@ where
     }
 
     async fn delete_fossil(&self, id: &C) -> IoResult<()> {
-        let mut buf = self.directory().to_owned();
-        buf.push("fossils");
-        buf.push(id.into());
-        match tokio::fs::remove_file(buf).await {
+        let path = self.create_path_from_id("fossils", id)?;
+        match tokio::fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e)
@@ -1253,28 +1268,22 @@ where
     }
 
     async fn manifest(&self, id: &M) -> Result<Self::Manifest, ManifestDecodingError> {
-        let mut buf = self.directory().to_owned();
-        buf.push("manifests");
-        buf.push(id.into());
-        let file = tokio::fs::File::open(buf).await.map_err(|e|  ManifestDecodingError::IoError(e))?;
+        let path = self.create_path_from_id("manifests", id).map_err(|e| ManifestDecodingError::IoError(e))?;
+        let file = tokio::fs::File::open(path).await.map_err(|e| ManifestDecodingError::IoError(e))?;
         let reader = futures::io::BufReader::new(file.compat());
         Manifest::from_file(reader).await
     }
 
     // TODO: better handling of oversized client ids, better encoding / decoding errors in general (try to not use as)
     async fn create_manifest(&self, id: &M, client: &I) -> Result<Self::Builder, ManifestEncodingError> {
-        let mut buf = self.directory().to_owned();
-        buf.push("manifests");
-        buf.push(id.into());
-        let writer = self.upload_manifest(buf).await.map_err(|e|  ManifestEncodingError::IoError(e))?;
+        let path = self.create_path_from_id("manifests", id).map_err(|e| ManifestEncodingError::IoError(e))?;
+        let writer = self.upload_manifest(path).await.map_err(|e|  ManifestEncodingError::IoError(e))?;
         ManifestBuilder::from_upload(writer, client).await
     }
 
     async fn remove_manifest(&self, id: &M) -> Result<(), <Self as Repository<M, I, C>>::Error> {
-        let mut buf = self.directory().to_owned();
-        buf.push("manifests");
-        buf.push(id.into());
-        tokio::fs::remove_file(buf).await
+        let path = self.create_path_from_id("manifests", id)?;
+        tokio::fs::remove_file(path).await
     }
 }
 

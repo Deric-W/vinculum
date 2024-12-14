@@ -1,7 +1,7 @@
 //! Tests for reading manifest files
 
-use super::{BigID, EmptyID};
-use crate::files_backend::{create_repository, ID};
+use super::BigID;
+use crate::files_backend::{create_repository, EmptyID, ID};
 use futures::io::{AsyncRead, AsyncReadExt};
 use futures::stream::StreamExt;
 use std::ffi::OsString;
