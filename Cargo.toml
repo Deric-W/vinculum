@@ -30,3 +30,8 @@ hex = "0.4.3"
 
 [features]
 files = ["dep:tokio", "dep:libc", "dep:tokio-stream", "dep:tokio-util", "dep:pin-project", "dep:rand"]
+
+# docs.rs-specific configuration
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -4,6 +4,8 @@
 //! such as [Duplicacy](https://duplicacy.com) as described in their
 //! [paper](https://github.com/gilbertchen/duplicacy/blob/master/duplicacy_paper.pdf).
 
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
 pub mod backends;
 pub mod utils;
 
@@ -88,7 +90,7 @@ pub trait ChunkBackend<C> {
 
     /// Turn a chunk into a fossil.
     /// 
-    /// Since a [`Fossil`] may be referenced by new manifest files after creation
+    /// Since a fossil may be referenced by new manifest files after creation
     /// it is allowed to be used in place of its original chunk, but not during
     /// manifest creation.
     /// During manifest creation chunks having the same ID as the original chunk of
