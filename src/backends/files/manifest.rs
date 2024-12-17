@@ -273,15 +273,13 @@ where
     }
 }
 
-impl<C> crate::ManifestChunks<C> for ManifestChunks<C>
+impl<C> crate::ManifestChunks<C, ManifestDecodingError> for ManifestChunks<C>
 where
     for<'a> C: TryFrom<&'a [u8], Error = ()>,
 {
-    type Error = ManifestDecodingError;
-
     type Data = ManifestData;
 
-    async fn into_data(mut self) -> Result<Self::Data, Self::Error> {
+    async fn into_data(mut self) -> Result<Self::Data, ManifestDecodingError> {
         let mut reader = Pin::new(&mut self.reader);
         loop {
             match self.state {
@@ -472,10 +470,8 @@ impl AsyncRead for ManifestData {
     }
 }
 
-impl ManifestTimestamp for ManifestData {
-    type Error = ManifestDecodingError;
-
-    async fn into_timestamp(mut self) -> Result<std::time::SystemTime, Self::Error> {
+impl ManifestTimestamp<ManifestDecodingError> for ManifestData {
+    async fn into_timestamp(mut self) -> Result<std::time::SystemTime, ManifestDecodingError> {
         let mut reader = pin!(self.reader);
         loop {
             match self.state {
@@ -504,14 +500,12 @@ impl ManifestTimestamp for ManifestData {
     }
 }
 
-impl<C> crate::ManifestTimestamp for ManifestChunks<C>
+impl<C> crate::ManifestTimestamp<ManifestDecodingError> for ManifestChunks<C>
 where
     for<'a> C: TryFrom<&'a [u8], Error = ()>,
 {
-    type Error = ManifestDecodingError;
-
-    async fn into_timestamp(self) -> Result<std::time::SystemTime, Self::Error> {
-        let data = <ManifestChunks<C> as crate::ManifestChunks<C>>::into_data(self).await?;
+    async fn into_timestamp(self) -> Result<std::time::SystemTime, ManifestDecodingError> {
+        let data = <ManifestChunks<C> as crate::ManifestChunks<C, ManifestDecodingError>>::into_data(self).await?;
         data.into_timestamp().await
     }
 }

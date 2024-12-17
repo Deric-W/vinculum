@@ -9,8 +9,13 @@
 pub mod backends;
 pub mod utils;
 
+use std::iter::Extend;
+use std::collections::HashSet;
+use std::time::SystemTime;
+use std::pin::{pin, Pin};
+use std::iter::Iterator;
 use futures::io::{AsyncRead, AsyncWrite};
-use futures::stream::Stream;
+use futures::stream::{Stream, StreamExt, FuturesUnordered};
 use futures::sink::Sink;
 
 /// The client backend, with the type of client Id as a generic parameter (for example a UUID).
@@ -18,7 +23,7 @@ use futures::sink::Sink;
 /// Clients represent actors which can access a repository independently.
 pub trait ClientBackend<I> {
     /// The Type of errors produced by this implementation.
-    type Error;
+    type Error: std::error::Error;
 
     /// Enumerate all clients currently registered with the repository.
     /// 
@@ -55,7 +60,7 @@ pub trait ClientBackend<I> {
 /// duplicate data to be shared between multiple manifest files.
 pub trait ChunkBackend<C> {
     /// The Type of errors produced by this implementation.
-    type Error;
+    type Error: std::error::Error;
 
     /// Enumerate all chunks existing within the repository.
     /// 
@@ -138,16 +143,16 @@ pub trait ChunkBackend<C> {
 /// possibility to stream the manifest which prevents it from needing to be buffered in memory.
 pub trait Manifest<I, C> {
     /// The Type of errors produced by this implementation.
-    type Error;
+    type Error: std::error::Error;
 
     /// The Type representing the chunks and additional data uploaded by the user.
-    type Chunks: ManifestChunks<C, Error = Self::Error>;
+    type Chunks: ManifestChunks<C, Self::Error>;
 
     /// The Type representing the actual chunks referenced by the manifest.
     /// 
     /// This can be different from [`Manifest::Chunks`] if for example the actual
     /// content of the manifest is itself stored in chunks.
-    type ReferencedChunks: Stream<Item = Result<C, Self::Error>> + ManifestTimestamp;
+    type ReferencedChunks: Stream<Item = Result<C, Self::Error>> + ManifestTimestamp<Self::Error>;
 
     /// Client which created this manifest.
     fn creator(&self) -> &I;
@@ -165,28 +170,24 @@ pub trait Manifest<I, C> {
 
 /// Sequence of chunks uploaded by a client.
 /// 
-/// The generic parameter represents the chunk ids.
-pub trait ManifestChunks<C>: Stream<Item = Result<C, <Self as ManifestChunks<C>>::Error>> {
-    /// The Type of errors produced by this implementation.
-    type Error;
-
+/// The generic parameters represent the chunk ids and error type.
+pub trait ManifestChunks<C, E>: Stream<Item = Result<C, E>> {
     /// The Type representing the additional manifest data.
-    type Data: AsyncRead + ManifestTimestamp<Error = Self::Error>;
+    type Data: AsyncRead + ManifestTimestamp<E>;
 
     /// Continue with reading the additional manifest data uploaded by the client.
-    async fn into_data(self) -> Result<Self::Data, Self::Error>;
+    async fn into_data(self) -> Result<Self::Data, E>;
 }
 
 /// Final state of the manifest decoding process, producing the timestamp.
-pub trait ManifestTimestamp {
-    /// The Type of errors produced by this implementation.
-    type Error;
-
+/// 
+/// The generic parameter represents the error type.
+pub trait ManifestTimestamp<E> {
     /// Convert this manifest data into its timestamp.
     /// 
     /// The timestamp is recorded after all chunks where uploaded and and additional
     /// data was written, but may be before the manifest upload finished.
-    async fn into_timestamp(self) -> Result<std::time::SystemTime, Self::Error>;
+    async fn into_timestamp(self) -> Result<SystemTime, E>;
 }
 
 /// Trait representing a manifest creation process with the type of chunk Id as a generic parameter.
@@ -203,7 +204,7 @@ pub trait ManifestTimestamp {
 /// data after closing will result in errors.
 pub trait ManifestBuilder<C>: for<'a> Sink<&'a C, Error = <Self as ManifestBuilder<C>>::Error> {
     /// The Type of errors produced by this implementation.
-    type Error;
+    type Error: std::error::Error;
 
     /// The Type representing additional manifest data.
     type Data: AsyncWrite;
@@ -223,7 +224,7 @@ pub trait ManifestBuilder<C>: for<'a> Sink<&'a C, Error = <Self as ManifestBuild
 /// The generic parameters represent the type of manifest, client, chunk and fossil Ids.
 pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
     /// The Type of errors produced by this implementation.
-    type Error;
+    type Error: std::error::Error;
 
     /// Type of manifest stored in this repository.
     /// 
