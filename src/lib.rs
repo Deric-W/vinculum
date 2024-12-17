@@ -335,7 +335,7 @@ impl<C> FossilCollection<C> {
         self.fossils.append(&mut other.fossils);
     }
 
-    pub fn interactive_delete<'a, M, I>(&'a self) -> FossilDeleter<'a, M, I, C> {
+    pub fn interactive_delete<'a, I>(&'a self) -> FossilDeleter<'a, I, C> {
         FossilDeleter::new(self)
     }
 
@@ -359,27 +359,25 @@ impl<C> FossilCollection<C> {
         I: std::hash::Hash + Eq,
         <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin
     {
-        let mut deleter = self.interactive_delete::<M, I>();
-        deleter.add_unseen_manifests(repository, parallelism).await?;
+        let mut deleter = self.interactive_delete::<I>();
+        deleter.add_all_manifests(repository, parallelism).await?;
         deleter.delete(repository, parallelism).await
     }
 }
 
 #[derive(Debug)]
-pub struct FossilDeleter<'a, M, I, C> {
+pub struct FossilDeleter<'a, I, C> {
     fossil_collection: &'a FossilCollection<C>,
     referenced_chunks: HashSet<C>,
-    valid_clients: HashSet<I>,
-    seen_manifests: HashSet<M>
+    valid_clients: HashSet<I>
 }
 
-impl<'a, M, I, C> FossilDeleter<'a, M, I, C> {
-    fn new(fossil_collection: &'a FossilCollection<C>) -> FossilDeleter<'a, M, I, C> {
+impl<'a, I, C> FossilDeleter<'a, I, C> {
+    fn new(fossil_collection: &'a FossilCollection<C>) -> FossilDeleter<'a, I, C> {
         FossilDeleter {
             fossil_collection,
             referenced_chunks: HashSet::new(),
-            valid_clients: HashSet::new(),
-            seen_manifests: HashSet::new()
+            valid_clients: HashSet::new()
         }
     }
 
@@ -394,19 +392,10 @@ impl<'a, M, I, C> FossilDeleter<'a, M, I, C> {
     pub fn chunks_iter(&self) -> <&HashSet<C> as IntoIterator>::IntoIter {
         self.referenced_chunks.iter()
     }
-
-    pub fn manifests(&self) -> usize {
-        self.seen_manifests.len()
-    }
-
-    pub fn manifests_iter(&self) -> <&HashSet<M> as IntoIterator>::IntoIter {
-        self.seen_manifests.iter()
-    }
 }
 
-impl<'a, M, I, C> FossilDeleter<'a, M, I, C>
+impl<'a, I, C> FossilDeleter<'a, I, C>
 where
-    M: std::hash::Hash + Eq,
     C: std::hash::Hash + Eq,
     I: std::hash::Hash + Eq
 {
@@ -418,18 +407,13 @@ where
         self.referenced_chunks.contains(id)
     }
 
-    pub fn add_seen_manifest(&mut self, id: M, creator: I, timestamp: SystemTime) {
-        self.seen_manifests.insert(id);
+    pub fn add_seen_manifest(&mut self, creator: I, timestamp: SystemTime) {
         if timestamp > self.fossil_collection().timestamp() {
             self.valid_clients.insert(creator);
         }
     }
 
-    pub fn contains_manifest(&self, id: &M) -> bool {
-        self.seen_manifests.contains(id)
-    }
-
-    pub async fn delete<R>(&mut self, repository: &R, parallelism: usize) -> Result<
+    pub async fn delete<R, M>(&mut self, repository: &R, parallelism: usize) -> Result<
         (),
         FossilDeletionError<
             <R as Repository<M, I, C>>::Error,
@@ -452,7 +436,7 @@ where
         }
 
         // iterate through manifests a second time to make sure manifests created during iteration are picked up
-        self.add_unseen_manifests(repository, parallelism).await?;
+        self.add_all_manifests(repository, parallelism).await?;
         
         // deal with fossils
         for fossil in self.fossil_collection().fossils() {
@@ -466,7 +450,7 @@ where
         Ok(())
     }
 
-    async fn add_unseen_manifests<R>(&mut self, repository: &R, parallelism: usize) -> Result<
+    async fn add_all_manifests<R, M>(&mut self, repository: &R, parallelism: usize) -> Result<
         (),
         FossilDeletionError<
             <R as Repository<M, I, C>>::Error,
@@ -486,9 +470,6 @@ where
             while download_futures.len() < parallelism {
                 match manifest_stream.next().await {
                     Some(Ok(manifest)) => {
-                        if self.contains_manifest(&manifest) {
-                            continue;
-                        }
                         let buffer = match buffers.pop() {
                             Some(buf) => buf,
                             None => Vec::new()
@@ -502,13 +483,10 @@ where
             }
 
             match download_futures.next().await {
-                Some(Ok((manifest, creator, mut chunks, timestamp))) => {
+                Some(Ok((creator, mut chunks, timestamp))) => {
                     self.referenced_chunks.extend(chunks.drain(..));
                     buffers.push(chunks);
-                    if timestamp > self.fossil_collection().timestamp() {
-                        self.valid_clients.insert(creator);
-                    }
-                    self.seen_manifests.insert(manifest);
+                    self.add_seen_manifest(creator, timestamp);
                 },
                 Some(Err(e)) => return Err(FossilDeletionError::ManifestError(e)),
                 None => break
@@ -523,7 +501,7 @@ async fn download_manifest<R, M, I, C>(
     id: M,
     mut chunks_buffer: Vec<C>,
 ) -> Result<
-    (M ,I, Vec<C>, std::time::SystemTime),
+    (I, Vec<C>, std::time::SystemTime),
     <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error
 >
 where
@@ -537,5 +515,5 @@ where
         chunks_buffer.push(res?);
     }
     let timestamp = referenced_chunks.into_timestamp().await?;
-    Ok((id, creator, chunks_buffer, timestamp))
+    Ok((creator, chunks_buffer, timestamp))
 }
