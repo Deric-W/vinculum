@@ -258,3 +258,219 @@ pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
     /// this operation should be performed by a fossil collection step.
     async fn remove_manifest(&self, id: &M) -> Result<(), <Self as Repository<M, I, C>>::Error>;
 }
+
+/// Error produced by [`FossilCollection::delete`].
+#[derive(Debug)]
+pub enum FossilDeletionError<R, M, I, C> {
+    /// A repository operation failed.
+    RepositoryError(R),
+    /// A manifest reading operation failed
+    ManifestError(M),
+    /// A client operation failed.
+    ClientError(I),
+    /// A chunk operation failed
+    ChunkError(C),
+    /// Some clients have not created a new manifest since the accociated fossil collection finished.
+    TooEarly
+}
+
+impl<R, M, I, C> std::fmt::Display for FossilDeletionError<R, M, I, C>
+where
+    R: std::fmt::Display,
+    M: std::fmt::Display,
+    I: std::fmt::Display,
+    C: std::fmt::Display
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FossilDeletionError::RepositoryError(e) => write!(f, "repository operation failed with {}", e),
+            FossilDeletionError::ManifestError(e) => write!(f, "manifest operation failed with {}", e),
+            FossilDeletionError::ClientError(e) => write!(f, "client operation failed with {}", e),
+            FossilDeletionError::ChunkError(e) => write!(f, "chunk operation failed with {}", e),
+            FossilDeletionError::TooEarly => write!(f, "Some clients have not created a new manifest since the accociated fossil collection finished")
+        }
+    }
+}
+
+impl<R, M, I, C> std::error::Error for FossilDeletionError<R, M, I, C>
+where
+    R: std::error::Error,
+    M: std::error::Error,
+    I: std::error::Error,
+    C: std::error::Error
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            FossilDeletionError::RepositoryError(e) => e.source(),
+            FossilDeletionError::ManifestError(e) => e.source(),
+            FossilDeletionError::ClientError(e) => e.source(),
+            FossilDeletionError::ChunkError(e) => e.source(),
+            FossilDeletionError::TooEarly => None
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FossilCollection<C> {
+    // are assumed to be unique
+    fossils: Vec<C>,
+    timestamp: std::time::SystemTime
+}
+
+impl<C> FossilCollection<C> {
+    pub fn fossils(&self) -> &[C] {
+        &self.fossils
+    }
+
+    pub fn timestamp(&self) -> std::time::SystemTime {
+        self.timestamp
+    }
+
+    pub fn merge(&mut self, mut other: FossilCollection<C>)
+    where
+        C: std::hash::Hash + Eq
+    {
+        self.timestamp = std::cmp::max(other.timestamp, self.timestamp);
+        let existing_fossils: HashSet<&C> = self.fossils.iter().collect();
+        other.fossils.retain(|f| !existing_fossils.contains(f));
+        self.fossils.append(&mut other.fossils);
+    }
+
+    pub async fn delete<R, M, I>(
+        &self,
+        repository: &R,
+        parallelism: usize,
+    ) -> Result<
+        (),
+        FossilDeletionError<
+            <R as Repository<M, I, C>>::Error,
+            <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error,
+            <R as ClientBackend<I>>::Error,
+            <R as ChunkBackend<C>>::Error
+        >,
+    >
+    where
+        R: Repository<M, I, C>,
+        M: std::hash::Hash + Eq,
+        C: std::hash::Hash + Eq,
+        I: std::hash::Hash + Eq,
+        <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin
+    {
+        // iterate through manifests and check which clients satisfy Policy 3
+        let mut referenced_chunks = HashSet::<C>::new();
+        let mut matched_clients = HashSet::<I>::new();
+        let mut buffers = Vec::<Vec<C>>::with_capacity(parallelism);
+        let mut manifest_stream = pin!(repository.manifests().await.map_err(|e| FossilDeletionError::RepositoryError(e))?.fuse());
+        let mut manifests = HashSet::<M>::with_capacity(manifest_stream.size_hint().0);
+        let mut download_futures = FuturesUnordered::new();
+        loop {
+            if download_futures.len() < parallelism {
+                match manifest_stream.next().await {
+                    Some(Ok(manifest)) => {
+                        let buffer = match buffers.pop() {
+                            Some(buf) => buf,
+                            None => Vec::new()
+                        };
+                        let fut = download_manifest(repository, manifest, buffer);
+                        download_futures.push(fut);
+                        continue;
+                    },
+                    Some(Err(e)) => return Err(FossilDeletionError::RepositoryError(e)),
+                    None => ()
+                }
+            }
+    
+            match download_futures.next().await {
+                Some(Ok((manifest, creator, mut chunks, timestamp))) => {
+                    referenced_chunks.extend(chunks.drain(..));
+                    buffers.push(chunks);
+                    if timestamp > self.timestamp() {
+                        matched_clients.insert(creator);
+                    }
+                    manifests.insert(manifest);
+                },
+                Some(Err(e)) => return Err(FossilDeletionError::ManifestError(e)),
+                None => break
+            }
+        }
+
+        // check Policy 3
+        let mut client_stream = pin!(repository.clients().await.map_err(|e| FossilDeletionError::ClientError(e))?);
+        loop {
+            match client_stream.next().await {
+                Some(Ok(client)) => {
+                    if !matched_clients.contains(&client) {
+                        return Err(FossilDeletionError::TooEarly)
+                    }
+                },
+                Some(Err(e)) => return Err(FossilDeletionError::ClientError(e)),
+                None => break
+            };
+        };
+
+        // iterate through manifests a second time to make sure manifests created during iteration are picked up
+        let mut manifest_stream = pin!(repository.manifests().await.map_err(|e| FossilDeletionError::RepositoryError(e))?.fuse());
+        loop {
+            if download_futures.len() < parallelism {
+                match manifest_stream.next().await {
+                    Some(Ok(manifest)) => {
+                        if manifests.contains(&manifest) {
+                            continue;
+                        }
+                        let buffer = match buffers.pop() {
+                            Some(buf) => buf,
+                            None => Vec::new()
+                        };
+                        let fut = download_manifest(repository, manifest, buffer);
+                        download_futures.push(fut);
+                        continue;
+                    },
+                    Some(Err(e)) => return Err(FossilDeletionError::RepositoryError(e)),
+                    None => ()
+                }
+            }
+    
+            match download_futures.next().await {
+                Some(Ok((_, _, mut chunks, _))) => {
+                    referenced_chunks.extend(chunks.drain(..));
+                    buffers.push(chunks);
+                },
+                Some(Err(e)) => return Err(FossilDeletionError::ManifestError(e)),
+                None => break
+            }
+        }
+
+        // deal with fossils
+        for fossil in self.fossils() {
+            if referenced_chunks.contains(fossil) {
+                repository.recover_fossil(fossil).await
+            } else {
+                repository.delete_fossil(fossil).await
+            }.map_err(|e| FossilDeletionError::ChunkError(e))?;
+        }
+
+        Ok(())
+    }
+}
+
+async fn download_manifest<R, M, I, C>(
+    repository: &R,
+    id: M,
+    mut chunks_buffer: Vec<C>,
+) -> Result<
+    (M ,I, Vec<C>, std::time::SystemTime),
+    <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error
+>
+where
+    R: Repository<M, I, C>,
+    <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin
+{
+    let (creator, mut referenced_chunks) = repository.manifest(&id).await?.into_referenced_chunks();
+    let mut pinned_chunks = Pin::new(&mut referenced_chunks);
+    chunks_buffer.reserve(pinned_chunks.size_hint().0);
+    while let Some(res) = pinned_chunks.as_mut().next().await {
+        chunks_buffer.push(res?);
+    }
+    let timestamp = referenced_chunks.into_timestamp().await?;
+    Ok((id, creator, chunks_buffer, timestamp))
+}
