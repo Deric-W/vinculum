@@ -1,0 +1,485 @@
+\documentclass[english,utf8,aspectratio=169]{beamer}
+\usetheme{tud}
+\usecolortheme{tud}
+\usepackage[backend = biber,style = numeric]{biblatex}
+\addbibresource{references.bib}
+\usepackage[inkscapepath={./build/svg-inkscape}]{svg}
+\svgpath{{./img/}}
+
+\AtBeginSection[]{\partpage{\usebeamertemplate***{part page}}}
+\setbeamertemplate{theorems}[numbered]
+
+\title{Lock-Free Deduplication}
+\subtitle{Implementation considerations}
+\author{Eric Niklas Wolf}
+\institut{Chair of Distributed and Networked Systems}
+
+\begin{document}
+    \maketitle
+
+    \begin{frame}
+        \frametitle{Outline}
+        \tableofcontents
+    \end{frame}
+
+    \section{Introduction}
+    \begin{frame}
+        \frametitle{Fossil collection step}
+        \begin{columns}
+            \begin{column}{.5\textwidth}
+                \begin{itemize}
+                    \item identifies chunks to be deleted
+                    \item archives may be created in parallel, possibly after
+                        downloading manifest files
+                \end{itemize}
+                To prevent a race condition causing chunks to be deleted prematurely they
+                are first turned into fossils.
+            \end{column}
+            \begin{column}{.5\textwidth}
+                \includesvg[height=0.8\textheight, width=0.9\textwidth, pretex=\small]{fossil_collection.drawio}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Fossil deletion step}
+        \begin{columns}
+            \begin{column}{.5\textwidth}
+                \begin{itemize}
+                    \item uses an existing fossil collection
+                    \item fossils which where referenced in the meantime are recovered
+                \end{itemize}
+                Is delayed~\cite[Policy 3]{Duplicacy} until referencing a chunk would cause a new
+                one to be uploaded~\cite[Policy 2]{Duplicacy}.
+            \end{column}
+            \begin{column}{.5\textwidth}
+                \includesvg[height=0.8\textheight, width=0.9\textwidth, pretex=\small]{fossil_deletion.drawio}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    \section{Race condition during fossil collection and deletion}
+    \begin{frame}
+        \frametitle{A flawed proof}
+        \begin{theorem}
+            The proof that some processes running the fossil collection step while others run the
+            fossil deletion step is lock-free~\cite[Theorem 1, Case 3]{Duplicacy} is flawed since
+            the processes can influence eachother by operating on the same chunk or fossil.
+        \end{theorem}
+        \begin{proof}
+            Since both steps operate on both fossils and chunks (by renaming between the two) and
+            the chunks (or fossils) contained in the local fossil collection files don't have to be
+            unique they can operate on the same fossil or chunk, causing a fossil in the following
+            example to be deleted prematurely.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Example}
+        Manifest files \#1, \#2 and \#3 reference the same chunk (exclusively).
+        \begin{center}
+            \includesvg[height=0.75\textheight, width=0.9\textwidth, pretex=\tiny]{fossil_race_condition.drawio}
+        \end{center}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        \begin{theorem}
+            \label{theorem:singleclient}
+            Assuming archives pruned by a fossil collection step are only removed during its execution.
+            By limiting fossil collection and deletion steps to a single client and the number of
+            pending fossil deletions steps to one fossil collection and deletion steps influencing
+            each other does not disrupt the Lock-Free Deduplication algorithm.
+        \end{theorem}
+        Since Duplicacy itself~\cite[prune]{Duplicacy-Wiki} uses a similar approach it seems to be
+        acceptable for most use cases.
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            The following interactions are possible:
+            \begin{enumerate}
+                \item A fossil collection step reverts a fossil recovery
+                \item A fossil collection step creates a fossil operated on by a fossil deletion step
+                \item A fossil deletion step recovers a fossil
+                \item A fossil deletion step deletes a fossil
+                \item A fossil deletion step creates a chunk operated on by a fossil collection step
+            \end{enumerate}
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            \begin{enumerate}
+                \item Should it revert a fossil recovery the fossil was once determined to be referenced
+                    by a fossil deletion step and should therefore only be fossilised after the
+                    referencing manifest files seen by the fossil deletion step where either removed
+                    or selected to be pruned by the fossil collection step.
+                    Since the fossil deletion step completed before the fossil collection step started
+                    any remaining archives still referencing the fossil are seen by the fossil collection step.
+                \item Should it create a fossil on which a fossil deletion step operates the fossil deletion
+                    step may recover or delete the fossil which will be proven not to disrupt the Lock-Free
+                    Deduplication algorithm by case 3 and 4.
+            \end{enumerate}
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \begin{proof}
+            \begin{enumerate}
+                \setcounter{enumi}{2}
+                \item Should the fossil deletion step recover a fossil it was once thought to be unreferenced
+                    and should therefore be only recovered if it is referenced again.
+                    Since a fossil deletion step prevents fossil collection steps from pruning archives
+                    during its execution a seen archive will still exist at the time the fossil is recovered.
+                \item Should the fossil deletion step delete a fossil it should only do so when there is no
+                    archive still referencing it.
+                    Since the fossil deletion step can only receive a fossil from its fossil collection
+                    step or one before it it can only start after Policy 3~\cite{Duplicacy} ensures no
+                    new archive can reference fossils created before its fossil collection step ended and
+                    therefore any archive still referencing the fossil will be seen by it.
+            \end{enumerate}
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            \begin{enumerate}
+                \setcounter{enumi}{4}
+                \item Should the fossil deletion step recover a chunk into a fossil on which a fossil
+                    collection step operates the fossil collection may revert it which was proven not to
+                    disrupt the Lock-Free Deduplication algorithm by case 1.
+            \end{enumerate}
+        \end{proof}
+    \end{frame}
+
+    \section{Non-atomic retrieval operation}
+    \begin{frame}
+        \frametitle{Accessing all archives}
+        \begin{itemize}
+            \item Lock-Free Deduplication requires an operation to retrieve all manifest
+                files~\cite[Operation `downloadAllManifestFiles']{Duplicacy}
+            \item on backends like POSIX filesystems this operation is split into listing
+                all files and accessing them
+            \item changes to a directory during listing may not be picked up
+            \item accessing files may itself be a non-atomic operation (chunked manifests)
+            \item since manifest files can be deleted at any time by a concurrently running
+                pruning operation accessing listed files can fail because they where deleted
+        \end{itemize}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        \begin{theorem}
+            Whether manifest files created or deleted during retrieval are picked up by the operation
+            or not does not disrupt the Lock-Free Deduplication algorithm.
+        \end{theorem}
+        \begin{corollary}
+            Since ignoring deleted files after listing is equivalent to their deletion being picked
+            up by the retrieval operation it is safe to do so.
+        \end{corollary}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof idea}
+        \begin{columns}
+            \begin{column}{.6\textwidth}
+                The result of an atomic retrieval operation is a snapshot of a point during its
+                execution while the non-atomic one allows creations and deletions happening during
+                its execution to be moved freely before or after this point.
+            \end{column}
+            \begin{column}{.4\textwidth}
+                \includesvg[height=0.8\textheight, width=0.9\textwidth, pretex=\small]{retrieval_cases.drawio}
+            \end{column}
+        \end{columns}
+        \vfill
+        It will be shown that any guarantees of an atomic implementation used by the algorithm
+        are also provided by an non-atomic operation.
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            If a manifest operation happens during the execution of the retrieval operation an atomic
+            implementation can't guarantee whether or not the operation happens before the snapshot
+            or after it, the same as a non-atomic operation.
+            The same is true for manifest operations happening before or after the execution of the
+            retrieval operation, since a non-atomic operation can not move them before or after the
+            snapshot giving them the same visibility when using an atomic operation.
+            The only difference is that the non-atomic implementation does not preserves the ordering
+            between different manifest operations happening during the execution of the retrieval operation,
+            which is not used by the algorithm and it is assumed the clients won't either.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{On manifest operation ordering}
+        The fossil deletion step assumes that after Policy 3 is satisfied the retrieval operation
+        will have seen any archive which may reference its fossils, leading to problems in the
+        following scenario should only the second manifest be seen:
+        \begin{center}
+            \includesvg[height=0.6\textheight, width=0.9\textwidth, pretex=\small]{manifest_ordering.drawio}
+        \end{center}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        \begin{theorem}
+            Performing a second listing operation after Policy 3 is satisfied will see any manifests
+            which may still reference the fossils.
+        \end{theorem}
+        \begin{proof}
+            Assuming an manifest which references the fossils is not seen by the retrieval operation.
+            Since it has to be created before the manifest satisfying Policy 3 for its
+            client~\cite[Policy 2]{Duplicacy} it has to be created during the retrieval operation
+            and therefore before a following second listing operation.
+        \end{proof}
+    \end{frame}
+
+    \section{Non-atomic chunk access}
+    \begin{frame}
+        \frametitle{Accessing a chunk}
+        \begin{block}{Fossil access policy~\cite[Policy 2]{Duplicacy}}
+            \begin{enumerate}
+                \item A restore, list, or check procedure that reads existing backups
+                    can read the fossil if the original chunk cannot be found.
+                \item A backup procedure cannot access any fossils.
+                    That is, it must upload a chunk if it cannot find the chunk,
+                    even if a corresponding fossil exists.
+            \end{enumerate}
+        \end{block}
+        \begin{theorem}
+            The fossil access policy is affected by a race condition in case the chunk and fossil
+            accesses are two separate operations which can cause chunks to appear as missing.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Possible fossil operations}
+        Manifest files \#1 and \#2 reference the same chunk (exclusively).
+        \begin{center}
+            \includesvg[height=0.75\textheight, width=0.9\textwidth, pretex=\small]{nonatomic_access.drawio}
+        \end{center}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            When executing the fossil collection and deletion steps started in the example the
+            following sequence of events is possible:
+            \begin{enumerate}
+                \item A chunk is turned into a fossil (by a fossil collection step)
+                \item A client tries to access the chunk and fails
+                \item The chunk is recovered from its fossil (by a fossil deletion step)
+                \item The client tries to access the fossil and fails
+            \end{enumerate}
+            From the perspective of the client the chunk is missing from the repository.
+            The sequence can be repeated as long as there are pending fossil deletions.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Solution}
+        A client may alternate between trying to access a chunk and its fossil, but can this
+        action result in an infinite loop?
+        \begin{theorem}
+            \label{theorem:nonatomic-chunks}
+            Assuming the client does not create any manifest files while accessing a chunk.
+            By performing the access pattern in Policy 2 two times a client will either find the
+            chunk or detect that it was deleted.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            A fossil deletion step must make sure Policy 3~\cite{Duplicacy} is satisfied before
+            continuing, causing new pending fossil deletion steps to wait until the client creates
+            a new archive.
+            Since Theorem~\ref{theorem:singleclient} limits the amount of pending fossil deletion
+            steps to one the chunk may only be recovered once during the access.
+            Should the first chunk and fossil access fail because of the fossil being deleted the
+            client will retry one more time before either finding a recreated chunk or determing
+            it to be deleted.
+            Should it fail because of the fossil being recovered by a fossil deletion step the chunk
+            can't be recovered again or deleted during the second access and is therefore found.
+        \end{proof}
+    \end{frame}
+
+    \section{Handling unreferenced chunks and fossils}
+    \begin{frame}
+        \frametitle{Sources}
+        When creating an archive fails after some chunks where already uploaded they could never be
+        referenced again and therefore cleaned up by a fossil collection step.
+        Should a fossil collection step fail after fossilising some chunks or a fossil deletion step
+        before either recovering or deleting its fossils they can also exist indefinitely.
+        \begin{theorem}
+            Assuming there is a way to enumerate all chunks and fossils existing within a repository.
+            It is possible to perform a fossil collection step which will identify unreferenced seen
+            chunks as such while also removing any seen fossils not being referenced by a fossil
+            collection during its fossil deletion step.
+            It will also not disrupt the Lock-Free Deduplication algorithm.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof (unreferenced chunks)}
+        \begin{proof}
+            Assuming a manifest file referencing all chunks existing in the repository at a given
+            point was created, pruning it would take care of all chunks which are not referenced
+            by any other manifest file.
+            We can pretend this manifest file was created and perform the fossil collection step
+            associated with its pruning operation by treating the set of all chunks existing within
+            the repository as the set of chunks referenced by it and not deleting it after completion.
+            Since Theorem~\ref{theorem:singleclient} prevents other fossil collection and deletion
+            steps from running in parallel they can not tell the difference between the manifest file
+            being deleted after the pruning operation or it never having been created in the first
+            place.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof (unreferenced fossils)}
+        \begin{proof}
+            To additionaly remove any unreferenced fossils the list of currently existing fossils
+            has to be added to the produced fossil collection before it ends.
+            Since the added fossils existed before the fossil collection step ended the following
+            fossil deletion step will only operate on fossils created before its fossil collection
+            step finished which was proven not to disrupt the Lock-Free Deduplication algorithm
+            by Theorem~\ref{theorem:singleclient} (Case 3,4 and 5 in Proof).
+            Since it will either recover or delete the fossils they will no longer exist in the
+            repository.
+            To prevent the fossil deletion step from interfering with Theorem~\ref{theorem:nonatomic-chunks}
+            by recovering a fossil multiple times the fossil collection has to be deduplicated.
+        \end{proof}
+    \end{frame}
+
+    \section{Adding clients}
+    \begin{frame}
+        \frametitle{Adding clients}
+        The paper~\cite{Duplicacy} treats the set of clients using a repository as being static,
+        but can this set be expanded?
+        \begin{theorem}
+            Expanding the set of clients does not disrupt the Lock-Free Deduplication algorithm. 
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:runafteradd}
+            Adding a client will not disrupt future fossil collection and deletion steps.
+        \end{lemma}
+        \begin{proof}
+            Adding a client will cause future fossil collection and deletion steps to treat him the
+            same as the existing clients, behaving as if the client has been part of a static client
+            set since the repository was created.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:collectwhileadd}
+            Adding a client will not disrupt fossil collection steps which where running at the
+            time of his addition.
+        \end{lemma}
+        \begin{proof}
+            The only way a new client can interact with a running fossil collection step is by
+            creating a new archive.
+            Should the fossil collection step see a new manifest file it will treat it the same as
+            manifest files created by existing clients, behaving as if the client has been part of a
+            static client set since the repository was created.
+            Should the fossil collection step not see the new manifest file it will behave the same
+            as if the client had been part of a static client set since the repository was created,
+            with the client not having created a single archive yet.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:deletewhileadd}
+            Adding a client will not disrupt fossil deletions which where running at the time of his
+            addition.
+        \end{lemma}
+        \begin{proof}
+            The fossil deletion seeing the new client will cause it to behave as if the client had
+            been part of a static client set since the repository was created, otherwise it will
+            behave as if the client does not exist.
+            Since a fossil deletion step implementing Theorem~\ref{theorem:singleclient} will only
+            access fossils created before its associated fossil collection step finished it won't
+            interact with the chunks created by the new client since they have to be recreated
+            should the client attempt to create archives referencing these fossils according to
+            Policy 2.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{lemma}
+            \label{lemma:usebeforeadd}
+            Adding a client will not disrupt fossil deletions which where using fossils created by
+            fossil collections which finished before it.
+        \end{lemma}
+        \begin{proof}
+            In case a fossil deletion is running at the time a client is being added it will not
+            be disrupted as proven by Lemma~\ref{lemma:deletewhileadd}.
+            Should this not be the case it will behave the same as if the client had been part of a
+            static client set since the repository was created, with the client not having created
+            a single archive yet.
+        \end{proof}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            The possible interactions between the addition of a new client and the Lock-Free
+            Deduplication algorithm are as follows:
+            \begin{enumerate}
+                \item a fossil collection or deletion was running after it, which is safe as proven
+                    by Lemma~\ref{lemma:runafteradd}
+                \item a fossil collection or deletion step was running during it, which is safe as proven
+                    by Lemma~\ref{lemma:collectwhileadd} and Lemma~\ref{lemma:deletewhileadd}
+                \item a fossil deletion step is running after its associated fossil collection step
+                    finished before it, which is safe as proven by Lemma~\ref{lemma:usebeforeadd}
+            \end{enumerate}
+            In all cases adding a client won't disrupt the Lock-Free Deduplication algorithm.
+        \end{proof}
+    \end{frame}
+
+    \section{Removing clients}
+    \begin{frame}
+        \frametitle{Removing clients}
+        The paper~\cite{Duplicacy} treats the set of clients using a repository as being static,
+        but can this set be reduced?
+        \begin{theorem}
+            Assuming a client will finish all running operations before being removed.
+            Reducing the set of clients does not disrupt the Lock-Free Deduplication algorithm beyond
+            the creation of fossils without an associated fossil collection.
+        \end{theorem}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Proof}
+        \begin{proof}
+            Removal of a client only influences future validations of Policy 3, which will ignore
+            the client.
+            Since manifest files can only be created by the client before it was removed there can
+            be no running archive creations by the client and therefore any manifest file from him
+            still referencing fossils will be seen by the following fossil deletion step.
+            This is the same guarantee provided by Policy 3 had the client not been removed.
+            Should the client be removed before running a fossil deletion step the fossils contained
+            in its fossil collection will be left behind.
+        \end{proof}
+    \end{frame}
+
+    \section{References}
+    \begin{frame}
+        \frametitle{References}
+        \printbibliography{}
+    \end{frame}
+\end{document}
