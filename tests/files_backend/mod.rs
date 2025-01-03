@@ -14,29 +14,6 @@ mod chunks;
 mod manifests;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ID {
-    inner: [u8; 32],
-}
-
-impl TryFrom<&[u8]> for ID {
-    type Error = ();
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let mut buf = [0; 32];
-        match hex::decode_to_slice(value, &mut buf) {
-            Ok(()) => Ok(ID { inner: buf }),
-            Err(_) => Err(()),
-        }
-    }
-}
-
-impl Into<OsString> for &ID {
-    fn into(self) -> OsString {
-        hex::encode(self.inner).into()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct EmptyID;
 
 impl TryFrom<&[u8]> for EmptyID {

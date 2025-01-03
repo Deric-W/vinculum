@@ -1,6 +1,7 @@
 //! Tests for the chunks
 
-use super::{create_repository, EmptyID, ID};
+use super::{create_repository, EmptyID};
+use crate::ID;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::stream::StreamExt;
 use std::ffi::OsString;

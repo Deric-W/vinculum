@@ -1,6 +1,7 @@
 //! Tests for commiting new files
 
-use super::{create_repository, PollOnce, ID};
+use super::{create_repository, PollOnce};
+use crate::ID;
 use futures::io::AsyncWriteExt;
 use std::ffi::OsString;
 use std::io::ErrorKind;

@@ -1,6 +1,7 @@
 //! Tests for reading and writing manifests
 
-use crate::files_backend::{create_repository, EmptyID, ID};
+use crate::files_backend::{create_repository, EmptyID};
+use crate::ID;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
