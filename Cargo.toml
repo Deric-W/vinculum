@@ -13,3 +13,25 @@ edition = "2021"
 [lib]
 path = "src/lib.rs"
 crate-type = ["lib"]
+
+[dependencies]
+futures = "0.3"
+tokio = { version = "1", features = ["fs", "io-util", "rt"], optional = true, default-features = false}
+tokio-stream = {version = "0.1.16", features = ["fs"], optional = true, default-features = false}
+tokio-util = {version = "0.7.12", features = ["compat"], optional = true, default-features = false} 
+libc = {version = "0.2.164", optional = true, default-features = false}
+pin-project = {version = "1.1.7", optional = true, default-features = false}
+rand = {version = "0.8.5", features = ["std", "std_rng"], optional = true, default-features = false}
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"], default-features = false}
+tempfile = "3"
+hex = "0.4.3"
+
+[features]
+files = ["dep:tokio", "dep:libc", "dep:tokio-stream", "dep:tokio-util", "dep:pin-project", "dep:rand"]
+
+# docs.rs-specific configuration
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
