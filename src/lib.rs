@@ -3,6 +3,51 @@
 //! This crates provides an implementation of the algorithm used by tools
 //! such as [Duplicacy](https://duplicacy.com) as described in their
 //! [paper](https://github.com/gilbertchen/duplicacy/blob/master/duplicacy_paper.pdf).
+//! 
+//! ## Overview
+//! 
+//! The most important object is the repository, which stores chunks, clients
+//! and manifests and is available to a number of clients.
+//! It is represented by the [`Repository`] trait, which has implementations
+//! defined in the [`backends`] module.
+//! 
+//! Clients represent individual users which may perform operations on the
+//! repository at the same time as other clients, like creating chunks or
+//! manifests.
+//! A single client can only perform some operations like manifest creation
+//! sequentially, while multiple clients can perform them in parallel.
+//! Furthermore, clients have to be registered with the repository before
+//! they perform any operations and should be removed when they won't create
+//! new manifests for a long time.
+//! 
+//! Manifests represent data uploaded by a client which has been divided
+//! into chunks and stored in the repository.
+//! Manifests only store references to their chunks and may share them with
+//! other manifests, which requires periodic chunk removals after some manifests
+//! have been deleted.
+//! 
+//! Chunks are pieces of data uploaded to the repository and may be referenced
+//! by manifests.
+//! They allow for deduplicating manifest contents by associating them with an
+//! id based on their content, causing chunks with the same content to only be
+//! stored once in the repository.
+//! 
+//! Chunk creation can be done in parallel (even by a single client), but chunk
+//! removal is more complicated because other clients can be in the process of
+//! creating manifests referencing them, which would cause invalid references
+//! should these chunks be deleted.
+//! To prevent this chunks should be first turned into a special type of chunk
+//! called "fossils" by using [`FossilCollectionBuilder`], which produces a
+//! [`FossilCollection`].
+//! This collection can be deleted when every client has created a manifest
+//! after the fossil collection was created, which will either permanently
+//! delete fossils or turn them back into chunks.
+//! It is possible to combine the deletion of a fossil collection with the
+//! creation of the next one using [`PipelinedFossilCollectionBuilder`].
+//! 
+//! ## Features
+//! 
+//! - `files`: enables a repository implementation utilising the local file system.
 
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
@@ -218,7 +263,7 @@ pub trait ManifestBuilder<C>: for<'a> Sink<&'a C, Error = <Self as ManifestBuild
     /// chunks, which allows clients to store (for example) additional metadata.
     /// 
     /// When the returned async write is closed a timestamp will be recorded
-    /// and the manifest created.
+    /// and the manifest created, replacing any existing manifest.
     async fn add_data(self) -> Result<Self::Data, <Self as ManifestBuilder<C>>::Error>;
 }
 
@@ -250,7 +295,10 @@ pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
 
     /// Create a manifest.
     /// 
-    /// A client creating a manifest while the same client is downloading a
+    /// When a manifest with an id has been created recreating it with the
+    /// same id but different content is not allowed.
+    /// 
+    /// Furthermore, a client creating a manifest while the same client is downloading a
     /// chunk can cause the download to fail by making it appear as if the
     /// chunk does not exist.
     async fn create_manifest(&self, id: &M, client: &I) -> Result<Self::Builder, <<Self as Repository<M, I, C>>::Builder as ManifestBuilder<C>>::Error>;
@@ -323,6 +371,9 @@ where
 /// and the resulting fossil collection can only be deleted after it can be proven
 /// that no new manifest referencing these fossils can be created, which allows
 /// erroneously created fossils to be safely recovered.
+/// 
+/// It is important that only one client performs the fossil collection and deletion
+/// operations and that only one fossil collection exists per repository.
 #[derive(Debug)]
 pub struct FossilCollection<M, C> {
     // are assumed to be unique
