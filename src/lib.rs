@@ -836,7 +836,7 @@ impl<'a, M, I, C> SimpleFossilDeleter<'a, M, I, C> {
     }
 }
 
-impl<'a, M, I, C> SimpleFossilDeleter<'a, M, I, C>
+impl<M, I, C> SimpleFossilDeleter<'_, M, I, C>
 where
     M: Hash + Eq,
     I: Hash + Eq,
