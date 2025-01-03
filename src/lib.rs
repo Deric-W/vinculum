@@ -299,6 +299,7 @@ pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
     ///
     /// Changes by creating or removing manifests during enumeration may or may
     /// not be picked up.
+    #[allow(clippy::type_complexity)]
     fn manifests(
         &self,
     ) -> impl Future<
@@ -312,12 +313,7 @@ pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
     fn manifest(
         &self,
         id: &M,
-    ) -> impl Future<
-        Output = Result<
-            Self::Manifest,
-            <<Self as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error,
-        >,
-    >;
+    ) -> impl Future<Output = Result<Self::Manifest, <Self::Manifest as Manifest<I, C>>::Error>>;
 
     /// Create a manifest.
     ///
@@ -331,12 +327,7 @@ pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
         &self,
         id: &M,
         client: &I,
-    ) -> impl Future<
-        Output = Result<
-            Self::Builder,
-            <<Self as Repository<M, I, C>>::Builder as ManifestBuilder<C>>::Error,
-        >,
-    >;
+    ) -> impl Future<Output = Result<Self::Builder, <Self::Builder as ManifestBuilder<C>>::Error>>;
 
     /// Remove a manifest.
     ///
@@ -816,6 +807,12 @@ where
     }
 }
 
+impl<M, C> Default for FossilCollectionBuilder<M, C> {
+    fn default() -> Self {
+        FossilCollectionBuilder::new()
+    }
+}
+
 /// Delete a fossil collection.
 ///
 /// This deleter is used internally by [`FossilCollection::delete`] and does not
@@ -898,7 +895,7 @@ impl<'a, M, I, C, E> PipelinedFossilDeletionError<'a, M, I, C, E> {
     }
 }
 
-impl<'a, M, I, C, E> std::fmt::Display for PipelinedFossilDeletionError<'a, M, I, C, E>
+impl<M, I, C, E> std::fmt::Display for PipelinedFossilDeletionError<'_, M, I, C, E>
 where
     E: std::fmt::Display,
 {
@@ -911,7 +908,7 @@ where
     }
 }
 
-impl<'a, M, I, C, E> std::error::Error for PipelinedFossilDeletionError<'a, M, I, C, E>
+impl<M, I, C, E> std::error::Error for PipelinedFossilDeletionError<'_, M, I, C, E>
 where
     M: std::fmt::Debug,
     I: std::fmt::Debug,
@@ -960,7 +957,7 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
 
     /// The fossil collection which will be deleted by this builder.
     pub fn fossil_collection(&self) -> &'a FossilCollection<M, C> {
-        &self.fossil_collection
+        self.fossil_collection
     }
 
     /// The number of chunks currently marked as fossil candidates.
@@ -984,7 +981,7 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
     }
 }
 
-impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C>
+impl<M, I, C> PipelinedFossilCollectionBuilder<'_, M, I, C>
 where
     M: Eq + Hash,
 {
@@ -1013,7 +1010,7 @@ where
     }
 }
 
-impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C>
+impl<M, I, C> PipelinedFossilCollectionBuilder<'_, M, I, C>
 where
     M: Eq + Hash,
     I: Eq + Hash,
@@ -1060,7 +1057,7 @@ where
     }
 }
 
-impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C>
+impl<M, I, C> PipelinedFossilCollectionBuilder<'_, M, I, C>
 where
     C: Eq + Hash,
 {
@@ -1190,9 +1187,9 @@ trait FossilDeleter<M, I, C> {
         let mut manifest_stream = pin!(repository
             .manifests()
             .await
-            .map_err(|e| FossilDeletionError::RepositoryError(e))?
+            .map_err(FossilDeletionError::RepositoryError)?
             .map_ok(|manifest| check_manifest(repository, manifest, &cell))
-            .map_err(|e| FossilDeletionError::RepositoryError(e))
+            .map_err(FossilDeletionError::RepositoryError)
             .try_buffer_unordered(parallelism));
         while let Some(res) = manifest_stream.next().await {
             res?;
@@ -1221,7 +1218,7 @@ trait FossilDeleter<M, I, C> {
         let mut client_stream = pin!(repository
             .clients()
             .await
-            .map_err(|e| FossilDeletionError::ClientError(e))?);
+            .map_err(FossilDeletionError::ClientError)?);
         while let Some(res) = client_stream.next().await {
             match res {
                 Ok(client) if self.has_valid_client(&client) => (),
@@ -1244,7 +1241,7 @@ trait FossilDeleter<M, I, C> {
             })
             .try_buffer_unordered(parallelism);
         while let Some(res) = fossil_stream.next().await {
-            res.map_err(|e| FossilDeletionError::FossilError(e))?;
+            res.map_err(FossilDeletionError::FossilError)?;
         }
 
         Ok(())
@@ -1275,17 +1272,17 @@ where
     let (creator, mut referenced_chunks) = repository
         .manifest(&id)
         .await
-        .map_err(|e| FossilDeletionError::ManifestError(e))?
+        .map_err(FossilDeletionError::ManifestError)?
         .into_referenced_chunks();
     let mut pinned_chunks = Pin::new(&mut referenced_chunks);
     while let Some(res) = pinned_chunks.as_mut().next().await {
-        let chunk = res.map_err(|e| FossilDeletionError::ManifestError(e))?;
+        let chunk = res.map_err(FossilDeletionError::ManifestError)?;
         deleter.borrow_mut().add_referenced_chunk(chunk);
     }
     let timestamp = referenced_chunks
         .into_timestamp()
         .await
-        .map_err(|e| FossilDeletionError::ManifestError(e))?;
+        .map_err(FossilDeletionError::ManifestError)?;
     deleter
         .borrow_mut()
         .add_seen_manifest(id, creator, timestamp);
@@ -1324,7 +1321,7 @@ where
     }
 
     fn fossil_collection(&self) -> &FossilCollection<M, C> {
-        &self.fossil_collection
+        self.fossil_collection
     }
 }
 

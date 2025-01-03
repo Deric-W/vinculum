@@ -23,8 +23,8 @@ impl TryFrom<&[u8]> for ID {
     }
 }
 
-impl Into<OsString> for &ID {
-    fn into(self) -> OsString {
-        hex::encode(self.inner).into()
+impl From<&ID> for OsString {
+    fn from(value: &ID) -> Self {
+        hex::encode(value.inner).into()
     }
 }
