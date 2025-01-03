@@ -853,6 +853,7 @@ pub struct PipelinedFossilCollectionBuilder<'a, M, I, C> {
     fossil_candidates: HashSet<C>,
     valid_clients: HashSet<I>,
     seen_manifests: HashSet<M>,
+    expiring_manifests: HashSet<M>
 }
 
 impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
@@ -865,6 +866,7 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
             fossil_candidates: HashSet::new(),
             valid_clients: HashSet::new(),
             seen_manifests: HashSet::new(),
+            expiring_manifests: HashSet::new()
         }
     }
 
@@ -917,7 +919,7 @@ where
         M: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
     {
-        self.seen_manifests.contains(id) || self.fossil_collection().has_seen_manifest(id)
+        self.seen_manifests.contains(id) || self.expiring_manifests.contains(id) || self.fossil_collection().has_seen_manifest(id)
     }
 }
 
@@ -944,6 +946,27 @@ where
         // insert even if seen by the fossil collection to pass them to the
         // created FossilCollectionBuilder
         self.seen_manifests.insert(id);
+    }
+
+    /// This method is similar to [`PipelinedFossilCollectionBuilder::add_seen_manifest`]
+    /// but does not pass the manifest to the created [`FossilCollectionBuilder`].
+    /// 
+    /// This is useful when a manifest should be seen by the fossil deletion operation
+    /// (for example to signal that a client has created a manifest since the fossil
+    /// collection operation) but its chunks should be fossil candidates for the
+    /// following fossil collection operation.
+    /// 
+    /// Unlike [`PipelinedFossilCollectionBuilder::add_seen_manifest`] this method
+    /// requires that any chunks referenced by this manifest have been passed to either
+    /// [`PipelinedFossilCollectionBuilder::add_referenced_chunk`] or
+    /// [`PipelinedFossilCollectionBuilder::add_fossil_candidate`].
+    pub fn add_expiring_manifest(&mut self, id: M, creator: I, timestamp: SystemTime) {
+        if timestamp > self.fossil_collection.timestamp() {
+            self.valid_clients.insert(creator);
+        }
+        if !self.fossil_collection.has_seen_manifest(&id) {
+            self.expiring_manifests.insert(id);
+        }
     }
 }
 
@@ -1030,8 +1053,8 @@ where
         match <Self as FossilDeleter<M, I, C>>::delete(&mut self, repository, parallelism).await {
             Ok(()) => {
                 let builder = FossilCollectionBuilder {
-                    // do not include manifests of fossil collection since they
-                    // might reference the fossil candidates
+                    // do not include manifests of fossil collection or expiring manifests
+                    // since they might reference the fossil candidates
                     seen_manifests: self.seen_manifests,
                     fossil_candidates: self.fossil_candidates,
                 };
@@ -1234,7 +1257,8 @@ where
     }
 
     fn has_referenced_chunk(&self, id: &C) -> bool {
-        self.referenced_chunks.contains(id)
+        // preserve fossil canidates until fossil collection
+        self.referenced_chunks.contains(id) || self.fossil_candidates.contains(id)
     }
 
     fn has_valid_client(&self, id: &I) -> bool {
