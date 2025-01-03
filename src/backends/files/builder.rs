@@ -15,7 +15,7 @@ use std::task::{ready, Context, Poll};
 /// Error produced by manifest encoding operations.
 #[derive(Debug)]
 pub enum ManifestEncodingError {
-    /// An I/O error occured.
+    /// An I/O error occurred.
     IoError(IoError),
     /// The length of the creator id exceeds [`u8::MAX`] bytes.
     InvalidCreator,
@@ -301,7 +301,7 @@ where
 enum DataEncodingState {
     /// Buffer contains only some amount of unwritten data, with the first two bytes being the length (not yet set)
     Accumulating(usize),
-    /// Buffer contains partially witten data, with the number of bytes written and the total amount
+    /// Buffer contains partially written data, with the number of bytes written and the total amount
     DataPending(usize, usize),
     /// Buffer contains partially written data and timestamp, with the number of bytes written and the total amount
     TimestampPending(usize, usize),

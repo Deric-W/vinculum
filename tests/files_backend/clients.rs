@@ -135,6 +135,7 @@ async fn reject_empty_client_id() {
     let res = <files::FileBackend as ClientBackend<EmptyID>>::client(&backend, &EmptyID).await;
     assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 
-    let res = <files::FileBackend as ClientBackend<EmptyID>>::remove_client(&backend, &EmptyID).await;
+    let res =
+        <files::FileBackend as ClientBackend<EmptyID>>::remove_client(&backend, &EmptyID).await;
     assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 }

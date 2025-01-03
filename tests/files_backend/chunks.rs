@@ -272,9 +272,11 @@ async fn reject_empty_chunk_id() {
     let res = <files::FileBackend as ChunkBackend<EmptyID>>::make_fossil(&backend, &EmptyID).await;
     assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 
-    let res = <files::FileBackend as ChunkBackend<EmptyID>>::recover_fossil(&backend, &EmptyID).await;
+    let res =
+        <files::FileBackend as ChunkBackend<EmptyID>>::recover_fossil(&backend, &EmptyID).await;
     assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 
-    let res = <files::FileBackend as ChunkBackend<EmptyID>>::delete_fossil(&backend, &EmptyID).await;
+    let res =
+        <files::FileBackend as ChunkBackend<EmptyID>>::delete_fossil(&backend, &EmptyID).await;
     assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 }

@@ -52,4 +52,4 @@ creation of the next one using [`PipelinedFossilCollectionBuilder`].
 
 ## Features
 
-- `files`: enables a repository implementation utilising the local file system.
+- `files`: enables a repository implementation utilizing the local file system.

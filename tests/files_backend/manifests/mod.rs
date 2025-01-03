@@ -47,7 +47,7 @@ impl Into<OsString> for &BigID {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SmallID {
-    inner: u8
+    inner: u8,
 }
 
 impl TryFrom<&[u8]> for SmallID {
@@ -84,12 +84,14 @@ async fn list_manifests() {
     }
     let invalid_manifest_path = backend.directory().join("manifests").join("test");
     std::fs::write(invalid_manifest_path, "").unwrap();
-    let manifests: Vec<ID> = pin!(<files::FileBackend as Repository<ID, ID, ID>>::manifests(&backend)
-        .await
-        .unwrap())
-        .map(|id| id.unwrap())
-        .collect()
-        .await;
+    let manifests: Vec<ID> = pin!(<files::FileBackend as Repository<ID, ID, ID>>::manifests(
+        &backend
+    )
+    .await
+    .unwrap())
+    .map(|id| id.unwrap())
+    .collect()
+    .await;
 
     assert_eq!(manifests.len(), 10);
     for i in 0..10 {
@@ -135,10 +137,15 @@ async fn is_round_trip() {
     let chunk1 = ID { inner: [2; 32] };
     let chunk2 = ID { inner: [3; 32] };
     let backend = create_repository(tmpdir.path());
-    let mut builder = <files::FileBackend as Repository<ID, ID, ID>>::create_manifest(&backend, &id, &creator).await.unwrap();
+    let mut builder =
+        <files::FileBackend as Repository<ID, ID, ID>>::create_manifest(&backend, &id, &creator)
+            .await
+            .unwrap();
     builder.feed(&chunk1).await.unwrap();
     builder.feed(&chunk2).await.unwrap();
-    let mut data = <files::ManifestBuilder as ManifestBuilder<ID>>::add_data(builder).await.unwrap();
+    let mut data = <files::ManifestBuilder as ManifestBuilder<ID>>::add_data(builder)
+        .await
+        .unwrap();
     data.write_all(&[1, 2, 3, 4, 5, 6]).await.unwrap();
     let before = std::time::SystemTime::now();
     data.close().await.unwrap();
@@ -150,12 +157,20 @@ async fn is_round_trip() {
 
     assert!(manifest_path.is_file());
 
-    let manifest = <files::FileBackend as Repository<ID, ID, ID>>::manifest(&backend, &id).await.unwrap();
+    let manifest = <files::FileBackend as Repository<ID, ID, ID>>::manifest(&backend, &id)
+        .await
+        .unwrap();
     let (manifest_creator, mut chunks_stream) = manifest.into_chunks();
-    let chunks: Vec<ID> = Pin::new(&mut chunks_stream).map(|r| r.unwrap()).collect().await;
+    let chunks: Vec<ID> = Pin::new(&mut chunks_stream)
+        .map(|r| r.unwrap())
+        .collect()
+        .await;
     let mut manifest_data = chunks_stream.into_data().await.unwrap();
     let mut data: Vec<u8> = Vec::new();
-    let length = Pin::new(&mut manifest_data).read_to_end(&mut data).await.unwrap();
+    let length = Pin::new(&mut manifest_data)
+        .read_to_end(&mut data)
+        .await
+        .unwrap();
     let manifest_timestamp = manifest_data.into_timestamp().await.unwrap();
 
     assert_eq!(manifest_creator, creator);
@@ -171,12 +186,24 @@ async fn reject_empty_manifest_id() {
     let tmpdir = tempdir().unwrap();
     let backend = create_repository(tmpdir.path());
 
-    let res = <files::FileBackend as Repository<EmptyID, ID, ID>>::manifest(&backend, &EmptyID).await;
-    assert!(matches!(res, Err(files::ManifestDecodingError::IoError(e)) if e.kind() == ErrorKind::Other));
+    let res =
+        <files::FileBackend as Repository<EmptyID, ID, ID>>::manifest(&backend, &EmptyID).await;
+    assert!(
+        matches!(res, Err(files::ManifestDecodingError::IoError(e)) if e.kind() == ErrorKind::Other)
+    );
 
-    let res = <files::FileBackend as Repository<EmptyID, ID, ID>>::create_manifest(&backend, &EmptyID, &ID { inner: [1; 32] }).await;
-    assert!(matches!(res, Err(files::ManifestEncodingError::IoError(e)) if e.kind() == ErrorKind::Other));
+    let res = <files::FileBackend as Repository<EmptyID, ID, ID>>::create_manifest(
+        &backend,
+        &EmptyID,
+        &ID { inner: [1; 32] },
+    )
+    .await;
+    assert!(
+        matches!(res, Err(files::ManifestEncodingError::IoError(e)) if e.kind() == ErrorKind::Other)
+    );
 
-    let res = <files::FileBackend as Repository<EmptyID, ID, ID>>::remove_manifest(&backend, &EmptyID).await;
+    let res =
+        <files::FileBackend as Repository<EmptyID, ID, ID>>::remove_manifest(&backend, &EmptyID)
+            .await;
     assert!(matches!(res, Err(e) if e.kind() == ErrorKind::Other));
 }

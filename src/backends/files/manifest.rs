@@ -18,7 +18,7 @@ use tokio_util::compat::Compat;
 /// Error produced by manifest decoding operations.
 #[derive(Debug)]
 pub enum ManifestDecodingError {
-    /// An I/O error occured.
+    /// An I/O error occurred.
     IoError(IoError),
     /// The parsing of the creator failed.
     InvalidCreator,
@@ -311,7 +311,7 @@ where
 enum DataDecodingState {
     /// Reading a length field of a data batch, containing the number of bytes already read.
     DataLength(u8),
-    /// Reading a data batch, containing the number of bytes remanining.
+    /// Reading a data batch, containing the number of bytes remaining.
     Data(u16),
     /// Reading a timestamp, containing the number of bytes already read.
     Timestamp(u8),
@@ -505,7 +505,9 @@ where
     for<'a> C: TryFrom<&'a [u8], Error = ()>,
 {
     async fn into_timestamp(self) -> Result<std::time::SystemTime, ManifestDecodingError> {
-        let data = <ManifestChunks<C> as crate::ManifestChunks<C, ManifestDecodingError>>::into_data(self).await?;
+        let data =
+            <ManifestChunks<C> as crate::ManifestChunks<C, ManifestDecodingError>>::into_data(self)
+                .await?;
         data.into_timestamp().await
     }
 }

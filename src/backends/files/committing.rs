@@ -1,4 +1,4 @@
-//! Utilities for safely commiting files to the repository.
+//! Utilities for safely committing files to the repository.
 
 use futures::io::{AsyncWrite, Error as IoError, Result as IoResult};
 use pin_project::pin_project;

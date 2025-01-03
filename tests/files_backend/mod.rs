@@ -7,11 +7,11 @@ use std::pin::pin;
 use std::task::{Context, Poll};
 use vinculum::backends::files;
 
-mod initialization;
-mod uploading;
-mod clients;
 mod chunks;
+mod clients;
+mod initialization;
 mod manifests;
+mod uploading;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EmptyID;

@@ -1,4 +1,4 @@
-//! Backend implemented in the local unix filesystem.
+//! Backend implemented in the local UNIX file system.
 //!
 //! This backend uses types from [`tokio::fs`] and therefore depends on it.
 
@@ -23,7 +23,7 @@ use std::pin::Pin;
 use tokio_stream::wrappers::ReadDirStream;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
-/// Backend implemented in the local unix filesystem.
+/// Backend implemented in the local UNIX file system.
 ///
 /// This backend stores chunks, fossils, clients and manifests using individual
 /// files, performing no compression, encryption or further deduplication.
@@ -38,7 +38,7 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 /// and can therefore get lost after a power failure.
 ///
 /// Furthermore, the way tokio handles task cancellation allows running operations to
-/// complete on its threadpool after their future has been dropped, requiring a shutdown
+/// complete on its thread pool after their future has been dropped, requiring a shutdown
 /// of the used tokio runtime should a future of this backend be canceled and
 /// other operations happen only after its completion.
 ///
@@ -53,14 +53,14 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 ///
 /// ## Manifest format
 ///
-/// The manifest begins with a u8 encoding the length of the byte represention
+/// The manifest begins with a `u8` encoding the length of the byte representation
 /// of the creator id, followed by these bytes.
-/// Next will be a sequence of u8 encoding the length of the byte representation
+/// Next will be a sequence of `u8` encoding the length of the byte representation
 /// of a chunk id followed by these bytes until the length is zero.
 /// After that there will be a sequence of u16 encoding the length of a batch of
 /// additional data in bytes, followed by it until the length is zero.
 /// Last there will be the timestamp, stored as seconds and nanoseconds since the
-/// unix epoch.
+/// UNIX epoch.
 ///
 /// This limits the length of the creator id to [`u8::MAX`] bytes and the length
 /// of chunk ids to [`u8::MAX`] bytes and greater than zero.
