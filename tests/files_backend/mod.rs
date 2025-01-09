@@ -20,7 +20,7 @@ impl TryFrom<&[u8]> for EmptyID {
     type Error = ();
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() == 0 {
+        if value.is_empty() {
             Ok(EmptyID {})
         } else {
             Err(())
@@ -28,8 +28,8 @@ impl TryFrom<&[u8]> for EmptyID {
     }
 }
 
-impl Into<OsString> for &EmptyID {
-    fn into(self) -> OsString {
+impl From<&EmptyID> for OsString {
+    fn from(_: &EmptyID) -> Self {
         "".into()
     }
 }

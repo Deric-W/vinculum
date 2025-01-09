@@ -87,14 +87,14 @@ where
         reader
             .read_exact(&mut buf)
             .await
-            .map_err(|e| ManifestDecodingError::IoError(e))?;
+            .map_err(ManifestDecodingError::IoError)?;
         let length = u8::from_be_bytes(buf);
         let mut buf = vec![0; u8::MAX.into()].into_boxed_slice();
         let creator_buf = &mut buf[..length.into()];
         reader
             .read_exact(creator_buf)
             .await
-            .map_err(|e| ManifestDecodingError::IoError(e))?;
+            .map_err(ManifestDecodingError::IoError)?;
         let creator =
             I::try_from(creator_buf).map_err(|_| ManifestDecodingError::InvalidCreator)?;
         Ok(Manifest::new(reader, creator, buf))
@@ -207,7 +207,7 @@ where
         while *read < length {
             match ready!(reader.as_mut().poll_read(cx, &mut bytes[(*read).into()..])) {
                 Ok(length) if length > 0 => {
-                    *read = *read + length as u8;
+                    *read += length as u8;
                 }
                 Ok(_) => {
                     return Poll::Ready(Err(ManifestDecodingError::IoError(
@@ -232,7 +232,7 @@ where
     ) -> Poll<Result<ChunksDecodingState, ManifestDecodingError>> {
         if read < length {
             ready!(reader.poll_seek_relative(cx, (length - read).into()))
-                .map_err(|e| ManifestDecodingError::IoError(e))?;
+                .map_err(ManifestDecodingError::IoError)?;
         }
         Poll::Ready(Ok(ChunksDecodingState::ChunkLength(0)))
     }
@@ -346,7 +346,7 @@ impl ManifestData {
         while (*read) < 2 {
             match ready!(reader.as_mut().poll_read(cx, &mut buf[(*read).into()..2])) {
                 Ok(length) if length > 0 => {
-                    *read = *read + length as u8;
+                    *read += length as u8;
                 }
                 Ok(_) => return Poll::Ready(Err(ErrorKind::UnexpectedEof.into())),
                 Err(e) => return Poll::Ready(Err(e)),
@@ -367,15 +367,15 @@ impl ManifestData {
         remaining: &mut u16,
         requested: &mut [u8],
     ) -> Poll<Result<(usize, DataDecodingState), IoError>> {
-        if requested.len() == 0 {
+        if requested.is_empty() {
             return Poll::Ready(Ok((0, DataDecodingState::Data(*remaining))));
         }
         if *remaining > 0 {
             match ready!(reader.as_mut().poll_fill_buf(cx)) {
-                Ok(data) if data.len() > 0 => {
+                Ok(data) if !data.is_empty() => {
                     let read_data = std::cmp::min((*remaining).into(), data.len());
                     let consumed_data = std::cmp::min(read_data, requested.len());
-                    *remaining = *remaining - consumed_data as u16;
+                    *remaining -= consumed_data as u16;
                     requested[..consumed_data].copy_from_slice(&data[..consumed_data]);
                     reader.consume(consumed_data);
                     if *remaining > 0 {
@@ -418,7 +418,7 @@ impl ManifestData {
         while (*read) < 12 {
             match ready!(reader.as_mut().poll_read(cx, &mut buf[(*read).into()..12])) {
                 Ok(length) if length > 0 => {
-                    *read = *read + length as u8;
+                    *read += length as u8;
                 }
                 Ok(_) => {
                     return Poll::Ready(Err(ManifestDecodingError::IoError(
@@ -480,13 +480,13 @@ impl ManifestTimestamp<ManifestDecodingError> for ManifestData {
                         ManifestData::poll_data_length(cx, reader.as_mut(), &mut self.buf, read)
                     })
                     .await
-                    .map_err(|e| ManifestDecodingError::IoError(e))?;
+                    .map_err(ManifestDecodingError::IoError)?;
                 }
                 DataDecodingState::Data(remaining) => {
                     self.state =
                         poll_fn(|cx| ManifestData::poll_skip_data(cx, reader.as_mut(), remaining))
                             .await
-                            .map_err(|e| ManifestDecodingError::IoError(e))?;
+                            .map_err(ManifestDecodingError::IoError)?;
                 }
                 DataDecodingState::Timestamp(ref mut read) => {
                     let timestamp = poll_fn(|cx| {

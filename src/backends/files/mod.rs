@@ -303,10 +303,10 @@ where
     async fn manifest(&self, id: &M) -> Result<Self::Manifest, ManifestDecodingError> {
         let path = self
             .create_path_from_id("manifests", id)
-            .map_err(|e| ManifestDecodingError::IoError(e))?;
+            .map_err(ManifestDecodingError::IoError)?;
         let file = tokio::fs::File::open(path)
             .await
-            .map_err(|e| ManifestDecodingError::IoError(e))?;
+            .map_err(ManifestDecodingError::IoError)?;
         let reader = futures::io::BufReader::new(file.compat());
         Manifest::from_file(reader).await
     }
@@ -318,11 +318,11 @@ where
     ) -> Result<Self::Builder, ManifestEncodingError> {
         let path = self
             .create_path_from_id("manifests", id)
-            .map_err(|e| ManifestEncodingError::IoError(e))?;
+            .map_err(ManifestEncodingError::IoError)?;
         let writer = self
             .upload_manifest(path)
             .await
-            .map_err(|e| ManifestEncodingError::IoError(e))?;
+            .map_err(ManifestEncodingError::IoError)?;
         ManifestBuilder::from_upload(writer, client).await
     }
 

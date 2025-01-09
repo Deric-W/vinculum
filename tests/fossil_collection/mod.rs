@@ -35,7 +35,7 @@ async fn create_chunks<R>(repository: &R, chunks: &[ID])
 where
     R: Repository<ID, ID, ID>,
 {
-    for chunk in chunks.into_iter() {
+    for chunk in chunks.iter() {
         pin!(repository.add_chunk(chunk).await.unwrap())
             .close()
             .await

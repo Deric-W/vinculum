@@ -80,7 +80,7 @@ async fn has_chunks() {
         Ok(false)
     ));
 
-    std::fs::write(&chunk_path, &[]).unwrap();
+    std::fs::write(&chunk_path, []).unwrap();
 
     assert!(matches!(
         <files::FileBackend as ChunkBackend<ID>>::has_chunk(&backend, &id).await,
@@ -88,7 +88,7 @@ async fn has_chunks() {
     ));
 
     std::fs::remove_file(chunk_path).unwrap();
-    std::fs::write(&fossil_path, &[]).unwrap();
+    std::fs::write(&fossil_path, []).unwrap();
 
     assert!(matches!(
         <files::FileBackend as ChunkBackend<ID>>::has_chunk(&backend, &id).await,
@@ -242,7 +242,7 @@ async fn delete_fossils() {
         .directory()
         .join("fossils")
         .join(<&ID as Into<OsString>>::into(&id));
-    std::fs::write(&fossil_path, &[]).unwrap();
+    std::fs::write(&fossil_path, []).unwrap();
     <files::FileBackend as ChunkBackend<ID>>::delete_fossil(&backend, &id)
         .await
         .unwrap();
