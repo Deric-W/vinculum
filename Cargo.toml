@@ -35,3 +35,6 @@ files = ["dep:tokio", "dep:libc", "dep:tokio-stream", "dep:tokio-util", "dep:pin
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[workspace]
+members = ["paper/benchmark"]

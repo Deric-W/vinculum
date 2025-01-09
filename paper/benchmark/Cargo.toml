@@ -1,0 +1,14 @@
+[package]
+name = "vinculum-benchmark"
+version = "0.1.0"
+authors = ["Eric Niklas Wolf <robo-eric@gmx.de>"]
+description = "Simple frontend for benchmark purposes"
+readme = "README.md"
+repository = "https://github.com/Deric-W/vinculum"
+license = "LGPL-2.1-only"
+keywords = ["backup", "deduplication"]
+categories = ["database-implementations"]
+edition = "2021"
+
+[dependencies]
+vinculum = { path = "../.." }
