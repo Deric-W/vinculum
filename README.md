@@ -13,8 +13,8 @@ such as [Duplicacy](https://duplicacy.com) as described in their
 
 The most important object is the repository, which stores chunks, clients
 and manifests and is available to a number of clients.
-It is represented by the [`Repository`] trait, which has implementations
-defined in the [`backends`] module.
+It is represented by the `Repository` trait, which has implementations
+defined in the `backends` module.
 
 Clients represent individual users which may perform operations on the
 repository at the same time as other clients, like creating chunks or
@@ -42,14 +42,15 @@ removal is more complicated because other clients can be in the process of
 creating manifests referencing them, which would cause invalid references
 should these chunks be deleted.
 To prevent this chunks should be first turned into a special type of chunk
-called "fossils" by using [`FossilCollectionBuilder`], which produces a
-[`FossilCollection`].
+called "fossils" by using `FossilCollectionBuilder`, which produces a
+`FossilCollection`.
 This collection can be deleted when every client has created a manifest
 after the fossil collection was created, which will either permanently
 delete fossils or turn them back into chunks.
 It is possible to combine the deletion of a fossil collection with the
-creation of the next one using [`PipelinedFossilCollectionBuilder`].
+creation of the next one using `PipelinedFossilCollectionBuilder`.
 
 ## Features
 
 - `files`: enables a repository implementation utilizing the local file system.
+- `serde`: implements `serde::Serialize` and `serde::Deserialize` for `FossilCollection`.

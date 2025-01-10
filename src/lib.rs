@@ -48,6 +48,7 @@
 //! ## Features
 //!
 //! - `files`: enables a repository implementation utilizing the local file system.
+//! - `serde`: implements [`serde::Serialize`] and [`serde::Deserialize`] for [`FossilCollection`].
 
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
@@ -404,9 +405,11 @@ where
 /// It is important that only one client performs the fossil collection and deletion
 /// operations and that only one fossil collection exists per repository.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FossilCollection<M, C> {
     // are assumed to be unique
     fossils: Vec<C>,
+    #[cfg_attr(feature = "serde", serde(bound(deserialize = "M: Eq + Hash + serde::Deserialize<'de>")))]
     seen_manifests: HashSet<M>,
     timestamp: std::time::SystemTime,
 }
@@ -433,6 +436,9 @@ impl<M, C> FossilCollection<M, C> {
     ///  - the fossils may not contain duplicates
     ///  - the seen manifests do not reference the fossils
     ///  - the timestamp was recorded after the fossils where created
+    /// 
+    /// Consider enabling the `serde` feature when working with serde to implement
+    /// the [`serde::Serialize`] and [`serde::Deserialize`] traits.
     pub fn from_parts<F, S>(
         fossils: F,
         seen_manifests: S,
