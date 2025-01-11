@@ -63,7 +63,7 @@ use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::future::Future;
-use std::hash::{Hash, RandomState};
+use std::hash::Hash;
 use std::iter::{Extend, IntoIterator, Iterator};
 use std::pin::{pin, Pin};
 use std::time::SystemTime;
@@ -409,7 +409,10 @@ where
 pub struct FossilCollection<M, C> {
     // are assumed to be unique
     fossils: Vec<C>,
-    #[cfg_attr(feature = "serde", serde(bound(deserialize = "M: Eq + Hash + serde::Deserialize<'de>")))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound(deserialize = "M: Eq + Hash + serde::Deserialize<'de>"))
+    )]
     seen_manifests: HashSet<M>,
     timestamp: std::time::SystemTime,
 }
@@ -436,7 +439,7 @@ impl<M, C> FossilCollection<M, C> {
     ///  - the fossils may not contain duplicates
     ///  - the seen manifests do not reference the fossils
     ///  - the timestamp was recorded after the fossils where created
-    /// 
+    ///
     /// Consider enabling the `serde` feature when working with serde to implement
     /// the [`serde::Serialize`] and [`serde::Deserialize`] traits.
     pub fn from_parts<F, S>(
@@ -629,6 +632,7 @@ where
 pub struct FossilCollectionBuilder<M, C> {
     seen_manifests: HashSet<M>,
     fossil_candidates: HashSet<C>,
+    referenced_chunks: HashSet<C>,
 }
 
 impl<M, C> FossilCollectionBuilder<M, C> {
@@ -637,6 +641,7 @@ impl<M, C> FossilCollectionBuilder<M, C> {
         FossilCollectionBuilder {
             seen_manifests: HashSet::new(),
             fossil_candidates: HashSet::new(),
+            referenced_chunks: HashSet::new(),
         }
     }
 
@@ -648,6 +653,16 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     /// The chunks marked as fossil candidates.
     pub fn iter_fossil_candidates(&self) -> std::collections::hash_set::Iter<C> {
         self.fossil_candidates.iter()
+    }
+
+    /// The number of referenced chunks.
+    pub fn referenced_chunks(&self) -> usize {
+        self.referenced_chunks.len()
+    }
+
+    /// Iterate through the currently referenced chunks.
+    pub fn iter_referenced_chunks(&self) -> std::collections::hash_set::Iter<C> {
+        self.referenced_chunks.iter()
     }
 
     /// The number of seen manifests.
@@ -712,25 +727,14 @@ impl<M, C> FossilCollectionBuilder<M, C>
 where
     C: Hash + Eq,
 {
-    /// Add a chunk to be deleted.
+    /// Add a possibly unreferenced chunk.
     ///
-    /// The chunk may not be referenced by any manifest passed to [`FossilCollectionBuilder::add_seen_manifest`].
+    /// The chunk will be turned into a fossil on fossil collection unless
+    /// it is (or was) added as referenced, in which case it will stay that way.
     pub fn add_fossil_candidate(&mut self, id: C) {
-        self.fossil_candidates.insert(id);
-    }
-
-    /// Remove a chunk from this builder.
-    ///
-    /// Should a manifest be discovered which references chunks which where
-    /// thought to be unreferenced its referenced chunks must be removed from
-    /// the builder before passing it to [`FossilCollectionBuilder::add_seen_manifest`].
-    ///
-    /// This can be used to avoid storing unnecessary data in memory since manifests
-    /// can be inspected one by one and referenced chunks tracked in a [`HashSet`].
-    /// Should a manifest reference chunks they are first removed from the builder
-    /// before being added to the hash set, which is checked when adding new fossil candidates.
-    pub fn remove_fossil_candidate(&mut self, id: &C) {
-        self.fossil_candidates.remove(id);
+        if !self.referenced_chunks.contains(&id) {
+            self.fossil_candidates.insert(id);
+        }
     }
 
     /// Check if a chunk is a fossil candidate.
@@ -740,6 +744,23 @@ where
         Q: Hash + Eq + ?Sized,
     {
         self.fossil_candidates.contains(id)
+    }
+
+    /// Add a chunk referenced by a manifest.
+    ///
+    /// This method removes matching fossil candidates.
+    pub fn add_referenced_chunk(&mut self, id: C) {
+        self.fossil_candidates.remove(&id);
+        self.referenced_chunks.insert(id);
+    }
+
+    /// Check if a chunk is referenced.
+    pub fn has_referenced_chunk<Q>(&self, id: &Q) -> bool
+    where
+        C: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.referenced_chunks.contains(id)
     }
 
     /// Variant of [`FossilCollectionBuilder::collect_fossils`] which cleans up orphaned fossils.
@@ -799,6 +820,10 @@ where
     ///
     /// It will be used to reduce the number of manifests which will be checked
     /// when the created fossil collection is deleted.
+    ///
+    /// Since [`FossilCollectionBuilder::add_referenced_chunk`] removes matching
+    /// fossil candidates manifests which referenced chunks where added as such
+    /// to this builder may be passed to this method.
     pub fn add_seen_manifest(&mut self, id: M) {
         self.seen_manifests.insert(id);
     }
@@ -940,10 +965,8 @@ where
 #[derive(Debug)]
 pub struct PipelinedFossilCollectionBuilder<'a, M, I, C> {
     fossil_collection: &'a FossilCollection<M, C>,
-    referenced_chunks: HashSet<C>,
-    fossil_candidates: HashSet<C>,
+    builder: FossilCollectionBuilder<M, C>,
     valid_clients: HashSet<I>,
-    seen_manifests: HashSet<M>,
     expiring_manifests: HashSet<M>,
 }
 
@@ -953,10 +976,8 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
     ) -> PipelinedFossilCollectionBuilder<'a, M, I, C> {
         PipelinedFossilCollectionBuilder {
             fossil_collection,
-            referenced_chunks: HashSet::new(),
-            fossil_candidates: HashSet::new(),
+            builder: FossilCollectionBuilder::new(),
             valid_clients: HashSet::new(),
-            seen_manifests: HashSet::new(),
             expiring_manifests: HashSet::new(),
         }
     }
@@ -968,22 +989,22 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
 
     /// The number of chunks currently marked as fossil candidates.
     pub fn fossil_candidates(&self) -> usize {
-        self.fossil_candidates.len()
+        self.builder.fossil_candidates()
     }
 
     /// Iterate through the chunks currently marked as fossil candidates.
     pub fn iter_fossil_candidates(&self) -> std::collections::hash_set::Iter<C> {
-        self.fossil_candidates.iter()
+        self.builder.iter_fossil_candidates()
     }
 
     /// The number of currently referenced chunks.
     pub fn referenced_chunks(&self) -> usize {
-        self.referenced_chunks.len()
+        self.builder.referenced_chunks()
     }
 
     /// Iterate through the currently referenced chunks.
     pub fn iter_referenced_chunks(&self) -> std::collections::hash_set::Iter<C> {
-        self.referenced_chunks.iter()
+        self.builder.iter_referenced_chunks()
     }
 }
 
@@ -993,9 +1014,14 @@ where
 {
     /// Iterate through all manifests which where seen by either this builder
     /// or its associated fossil collection.
-    pub fn iter_seen_manifests(&self) -> std::collections::hash_set::Union<'_, M, RandomState> {
-        self.seen_manifests
-            .union(&self.fossil_collection.seen_manifests)
+    pub fn iter_seen_manifests(&self) -> impl Iterator<Item = &M> {
+        let seen_manifests = self
+            .builder
+            .iter_seen_manifests()
+            .chain(self.expiring_manifests.iter());
+        seen_manifests
+            .filter(|id| !self.fossil_collection.has_seen_manifest(id))
+            .chain(self.fossil_collection.iter_seen_manifests())
     }
 
     /// Check whether a manifest has been seen by this builder or its fossil collection.
@@ -1010,7 +1036,7 @@ where
         M: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
     {
-        self.seen_manifests.contains(id)
+        self.builder.has_seen_manifest(id)
             || self.expiring_manifests.contains(id)
             || self.fossil_collection().has_seen_manifest(id)
     }
@@ -1026,8 +1052,6 @@ where
     ///
     /// It is required that any chunks referenced by this manifest have been
     /// passed to [`PipelinedFossilCollectionBuilder::add_referenced_chunk`].
-    /// Since this removes any matching fossil candidates the manifests
-    /// referencing them can still be added to this builder.
     ///
     /// The fossil deletion can only proceed after for every client a manifest
     /// has been added which was created after the fossil collection of this
@@ -1036,9 +1060,11 @@ where
         if timestamp > self.fossil_collection.timestamp() {
             self.valid_clients.insert(creator);
         }
-        // insert even if seen by the fossil collection to pass them to the
+        // remove to prevent duplicates
+        self.expiring_manifests.remove(&id);
+        // add even if seen by the fossil collection to pass them to the
         // created FossilCollectionBuilder
-        self.seen_manifests.insert(id);
+        self.builder.add_seen_manifest(id);
     }
 
     /// This method is similar to [`PipelinedFossilCollectionBuilder::add_seen_manifest`]
@@ -1057,7 +1083,8 @@ where
         if timestamp > self.fossil_collection.timestamp() {
             self.valid_clients.insert(creator);
         }
-        if !self.fossil_collection.has_seen_manifest(&id) {
+        // do not insert if already seen
+        if !self.fossil_collection.has_seen_manifest(&id) && !self.builder.has_seen_manifest(&id) {
             self.expiring_manifests.insert(id);
         }
     }
@@ -1069,17 +1096,10 @@ where
 {
     /// Add a possibly unreferenced chunk.
     ///
-    /// This method is similar to [`FossilCollectionBuilder::add_fossil_candidate`]
-    /// but checks whether the fossil candidate was already added as a referenced chunk,
-    /// ignoring it if this is the case.
-    ///
-    /// This method does not place the same restriction on
-    /// [`PipelinedFossilCollectionBuilder::add_seen_manifest`], for more information
-    /// visit its description.
+    /// The chunk will be turned into a fossil on fossil collection unless
+    /// it is (or was) added as referenced, in which case it will stay that way.
     pub fn add_fossil_candidate(&mut self, id: C) {
-        if !self.referenced_chunks.contains(&id) {
-            self.fossil_candidates.insert(id);
-        }
+        self.builder.add_fossil_candidate(id);
     }
 
     /// Check if a chunk is a fossil candidate.
@@ -1088,15 +1108,14 @@ where
         C: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
     {
-        self.fossil_candidates.contains(id)
+        self.builder.has_fossil_candidate(id)
     }
 
     /// Add a chunk referenced by a manifest.
     ///
     /// This method removes matching fossil candidates.
     pub fn add_referenced_chunk(&mut self, id: C) {
-        self.fossil_candidates.remove(&id);
-        self.referenced_chunks.insert(id);
+        self.builder.add_referenced_chunk(id);
     }
 
     /// Check if a chunk is referenced.
@@ -1105,7 +1124,7 @@ where
         C: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
     {
-        self.referenced_chunks.contains(id)
+        self.builder.has_referenced_chunk(id)
     }
 }
 
@@ -1143,16 +1162,10 @@ where
         R: Repository<M, I, C>,
         <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin,
     {
+        // do not include manifests of fossil collection or expiring manifests
+        // in builder since they might reference the fossil candidates
         match <Self as FossilDeleter<M, I, C>>::delete(&mut self, repository, parallelism).await {
-            Ok(()) => {
-                let builder = FossilCollectionBuilder {
-                    // do not include manifests of fossil collection or expiring manifests
-                    // since they might reference the fossil candidates
-                    seen_manifests: self.seen_manifests,
-                    fossil_candidates: self.fossil_candidates,
-                };
-                Ok(builder)
-            }
+            Ok(()) => Ok(self.builder),
             Err(e) => Err(PipelinedFossilDeletionError::new(self, e)),
         }
     }
@@ -1351,7 +1364,7 @@ where
 
     fn has_referenced_chunk(&self, id: &C) -> bool {
         // preserve fossil canidates until fossil collection
-        self.referenced_chunks.contains(id) || self.fossil_candidates.contains(id)
+        self.builder.has_referenced_chunk(id) || self.builder.has_fossil_candidate(id)
     }
 
     fn has_valid_client(&self, id: &I) -> bool {
