@@ -11,7 +11,10 @@ categories = ["database-implementations"]
 edition = "2021"
 
 [dependencies]
+futures = "0.3"
 serde = {version = "1.0", features = ["derive"] }
 clap = { version = "4.5.26", features = ["derive"] }
 hex = "0.4.3"
-vinculum = { path = "../.." }
+tokio = { version = "1", features = ["rt"] }
+vinculum = { path = "../..", features = ["files", "serde"] }
+ciborium = "0.2.2"
