@@ -3,6 +3,8 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+mod ids;
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
