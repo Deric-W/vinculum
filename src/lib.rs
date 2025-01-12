@@ -67,6 +67,7 @@ use std::hash::Hash;
 use std::iter::{Extend, IntoIterator, Iterator};
 use std::pin::{pin, Pin};
 use std::time::SystemTime;
+use thiserror::Error;
 
 /// The client backend, with the type of client Id as a generic parameter (for example a UUID).
 ///
@@ -341,54 +342,23 @@ pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
 }
 
 /// Error of a failed fossil deletion operation.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum FossilDeletionError<R, M, I, C> {
     /// A repository operation failed.
-    RepositoryError(R),
+    #[error("repository operation failed with {0}")]
+    RepositoryError(#[source] R),
     /// A manifest reading operation failed
-    ManifestError(M),
+    #[error("manifest operation failed with {0}")]
+    ManifestError(#[source] M),
     /// A client operation failed.
-    ClientError(I),
+    #[error("client operation failed with {0}")]
+    ClientError(#[source] I),
     /// A fossil operation failed
-    FossilError(C),
+    #[error("fossil operation failed with {0}")]
+    FossilError(#[source] C),
     /// Some clients have not created a new manifest since the associated fossil collection finished.
+    #[error("Some clients have not created a new manifest since the associated fossil collection finished")]
     TooEarly,
-}
-
-impl<R, M, I, C> std::fmt::Display for FossilDeletionError<R, M, I, C>
-where
-    R: std::fmt::Display,
-    M: std::fmt::Display,
-    I: std::fmt::Display,
-    C: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FossilDeletionError::RepositoryError(e) => write!(f, "repository operation failed with {}", e),
-            FossilDeletionError::ManifestError(e) => write!(f, "manifest operation failed with {}", e),
-            FossilDeletionError::ClientError(e) => write!(f, "client operation failed with {}", e),
-            FossilDeletionError::FossilError(e) => write!(f, "fossil operation failed with {}", e),
-            FossilDeletionError::TooEarly => write!(f, "Some clients have not created a new manifest since the associated fossil collection finished")
-        }
-    }
-}
-
-impl<R, M, I, C> std::error::Error for FossilDeletionError<R, M, I, C>
-where
-    R: std::error::Error,
-    M: std::error::Error,
-    I: std::error::Error,
-    C: std::error::Error,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            FossilDeletionError::RepositoryError(e) => e.source(),
-            FossilDeletionError::ManifestError(e) => e.source(),
-            FossilDeletionError::ClientError(e) => e.source(),
-            FossilDeletionError::FossilError(e) => e.source(),
-            FossilDeletionError::TooEarly => None,
-        }
-    }
 }
 
 /// A set of fossils await either recovery or deletion.
@@ -569,9 +539,11 @@ impl<M, C> FossilCollection<M, C> {
 }
 
 /// Error of a failed fossil collection operation.
-#[derive(Debug)]
+#[derive(Error, Debug)]
+#[error("error during fossil collection: {error}")]
 pub struct FossilCollectionError<M, C, E> {
     builder: FossilCollectionBuilder<M, C>,
+    #[source]
     error: E,
 }
 
@@ -594,26 +566,6 @@ impl<M, C, E> FossilCollectionError<M, C, E> {
     /// builder to allow for the operation to be retried.
     pub fn into_inner(self) -> (FossilCollectionBuilder<M, C>, E) {
         (self.builder, self.error)
-    }
-}
-
-impl<M, C, E> std::fmt::Display for FossilCollectionError<M, C, E>
-where
-    E: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "error during fossil collection: {}", self.error())
-    }
-}
-
-impl<M, C, E> std::error::Error for FossilCollectionError<M, C, E>
-where
-    M: std::fmt::Debug,
-    C: std::fmt::Debug,
-    E: std::error::Error,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.error().source()
     }
 }
 
@@ -895,9 +847,11 @@ where
 }
 
 /// Error of a failed call to [`PipelinedFossilCollectionBuilder::delete`].
-#[derive(Debug)]
+#[derive(Error, Debug)]
+#[error("error during pipelined fossil deletion: {error}")]
 pub struct PipelinedFossilDeletionError<'a, M, I, C, E> {
     builder: PipelinedFossilCollectionBuilder<'a, M, I, C>,
+    #[source]
     error: E,
 }
 
@@ -923,31 +877,6 @@ impl<'a, M, I, C, E> PipelinedFossilDeletionError<'a, M, I, C, E> {
     /// builder to allow for the operation to be retried.
     pub fn into_inner(self) -> (PipelinedFossilCollectionBuilder<'a, M, I, C>, E) {
         (self.builder, self.error)
-    }
-}
-
-impl<M, I, C, E> std::fmt::Display for PipelinedFossilDeletionError<'_, M, I, C, E>
-where
-    E: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "error during pipelined fossil deletion: {}",
-            self.error()
-        )
-    }
-}
-
-impl<M, I, C, E> std::error::Error for PipelinedFossilDeletionError<'_, M, I, C, E>
-where
-    M: std::fmt::Debug,
-    I: std::fmt::Debug,
-    C: std::fmt::Debug,
-    E: std::error::Error,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.error().source()
     }
 }
 

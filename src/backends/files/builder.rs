@@ -11,42 +11,26 @@ use std::fmt::Debug;
 use std::future::poll_fn;
 use std::pin::{pin, Pin};
 use std::task::{ready, Context, Poll};
+use thiserror::Error;
 
 /// Error produced by manifest encoding operations.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ManifestEncodingError {
     /// An I/O error occurred.
-    IoError(IoError),
+    #[error("I/O error: {0}")]
+    IoError(#[source] IoError),
     /// The length of the creator id exceeds [`u8::MAX`] bytes.
+    #[error("invalid creator")]
     InvalidCreator,
     /// The length of the chunk id exceeds [`u8::MAX`] bytes or is empty.
+    #[error("invalid chunk")]
     InvalidChunk,
     /// Calculating the timestamp failed, containing the difference from [`std::time::UNIX_EPOCH`].
-    InvalidTimestamp(std::time::SystemTimeError),
+    #[error("invalid timestamp: {0}")]
+    InvalidTimestamp(#[source] std::time::SystemTimeError),
     /// Invalid operation (such as adding more chunks after closing the builder).
+    #[error("invalid operation")]
     InvalidOperation,
-}
-
-impl std::fmt::Display for ManifestEncodingError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ManifestEncodingError::IoError(e) => write!(f, "I/O error: {}", e),
-            ManifestEncodingError::InvalidCreator => write!(f, "invalid creator"),
-            ManifestEncodingError::InvalidChunk => write!(f, "invalid chunk"),
-            ManifestEncodingError::InvalidTimestamp(e) => write!(f, "invalid timestamp: {}", e),
-            Self::InvalidOperation => write!(f, "invalid operation"),
-        }
-    }
-}
-
-impl std::error::Error for ManifestEncodingError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ManifestEncodingError::IoError(e) => e.source(),
-            ManifestEncodingError::InvalidTimestamp(e) => e.source(),
-            _ => None,
-        }
-    }
 }
 
 /// State of the manifest chunk encoding process

@@ -13,41 +13,24 @@ use std::io::ErrorKind;
 use std::marker::PhantomData;
 use std::pin::{pin, Pin};
 use std::task::{ready, Context, Poll};
+use thiserror::Error;
 use tokio_util::compat::Compat;
 
 /// Error produced by manifest decoding operations.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ManifestDecodingError {
     /// An I/O error occurred.
-    IoError(IoError),
+    #[error("I/O error: {0}")]
+    IoError(#[source] IoError),
     /// The parsing of the creator failed.
+    #[error("invalid creator")]
     InvalidCreator,
     /// The parsing of a chunk failed.
+    #[error("invalid chunk")]
     InvalidChunk,
     /// The parsing of the timestamp failed, containing the seconds and nanoseconds since [`std::time::UNIX_EPOCH`].
+    #[error("invalid timestamp (secs: {0}, nsecs: {1})")]
     InvalidTimestamp(u64, u32),
-}
-
-impl std::fmt::Display for ManifestDecodingError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ManifestDecodingError::IoError(e) => write!(f, "I/O error: {}", e),
-            ManifestDecodingError::InvalidCreator => write!(f, "invalid creator"),
-            ManifestDecodingError::InvalidChunk => write!(f, "invalid chunk"),
-            ManifestDecodingError::InvalidTimestamp(secs, nsecs) => {
-                write!(f, "invalid timestamp (secs: {}, nsecs: {}", secs, nsecs)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ManifestDecodingError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ManifestDecodingError::IoError(e) => e.source(),
-            _ => None,
-        }
-    }
 }
 
 /// Decoder of the manifest format used by [`FileBackend`](super::FileBackend).
