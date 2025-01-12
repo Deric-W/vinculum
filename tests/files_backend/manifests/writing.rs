@@ -193,11 +193,12 @@ async fn remove_on_drop() {
     std::mem::drop(builder);
     assert!(!upload_path.exists());
     assert!(backend
-            .directory()
-            .join("manifests")
-            .read_dir()
-            .unwrap()
-            .next().is_none());
+        .directory()
+        .join("manifests")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_none());
 }
 
 #[tokio::test]
