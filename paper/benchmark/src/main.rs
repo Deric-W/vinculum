@@ -2,6 +2,7 @@
 
 use crate::ids::{ChunkID, ID};
 use clap::{Args, Parser, Subcommand};
+use futures::io::AsyncWriteExt;
 use futures::stream::{iter, StreamExt, TryStreamExt};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -9,7 +10,8 @@ use std::pin::{pin, Pin};
 use tokio::runtime::Builder;
 use vinculum::backends::files::{initialize, FileBackend};
 use vinculum::{
-    FossilCollection, FossilCollectionBuilder, Manifest, ManifestTimestamp, Repository,
+    ClientBackend, FossilCollection, FossilCollectionBuilder, Manifest, ManifestTimestamp,
+    Repository,
 };
 
 mod ids;
@@ -34,6 +36,10 @@ enum Command {
     Collect(CollectArgs),
     /// Delete a fossil collection
     Delete(DeleteArgs),
+    /// Add a client
+    AddClient(ClientArgs),
+    /// Remove a client
+    RemoveClient(ClientArgs),
 }
 
 #[derive(Args)]
@@ -102,6 +108,14 @@ struct DeleteArgs {
     collect: Vec<String>,
 }
 
+#[derive(Args)]
+struct ClientArgs {
+    /// The path of the repository
+    repository: PathBuf,
+    /// The name of the client
+    client: String,
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -134,6 +148,22 @@ fn main() {
                 ));
                 store_collection(&collection, &args.collection);
             }
+        }
+        Command::AddClient(args) => {
+            let repository = FileBackend::new(args.repository);
+            let runtime = create_runtime();
+            runtime.block_on(async {
+                let id = ID::new(args.client);
+                let mut writer = pin!(repository.add_client(&id).await.unwrap());
+                writer.close().await.unwrap();
+            })
+        }
+        Command::RemoveClient(args) => {
+            let repository = FileBackend::new(args.repository);
+            let runtime = create_runtime();
+            runtime
+                .block_on(repository.remove_client(&ID::new(args.client)))
+                .unwrap();
         }
         _ => unimplemented!(),
     };
