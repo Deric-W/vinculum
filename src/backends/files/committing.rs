@@ -56,16 +56,12 @@ async fn commit_manifest(file: RemoveOnDrop, to: PathBuf) -> IoResult<()> {
     file.get_inner_ref().sync_all().await?;
     let chunks_dir = to.ancestors().nth(2).unwrap().join("chunks");
     // make sure directory entries of uploaded chunks are persisted
-    let chunks_dir = asyncify(move || {
-        sync_directory(&chunks_dir)?;
-        Ok::<PathBuf, IoError>(chunks_dir)
-    })
-    .await??;
+    asyncify(move || sync_directory(chunks_dir)).await??;
     // perform into_inner and rename as one operation which can not be canceled in between
-    asyncify(move || {
+    let to = asyncify(move || {
         let from = file.into_inner().1;
-        match std::fs::rename(&from, to) {
-            Ok(()) => Ok(()),
+        match std::fs::rename(&from, &to) {
+            Ok(()) => Ok(to),
             Err(e) => {
                 // ignore error when removing temporary file fails
                 let _ = std::fs::remove_file(from);
@@ -75,7 +71,7 @@ async fn commit_manifest(file: RemoveOnDrop, to: PathBuf) -> IoResult<()> {
     })
     .await??;
     // make sure directory entry of manifest is persisted
-    asyncify(move || sync_directory(chunks_dir)).await?
+    asyncify(move || sync_directory(to.parent().unwrap())).await?
 }
 
 async fn asyncify<F, R>(f: F) -> IoResult<R>
