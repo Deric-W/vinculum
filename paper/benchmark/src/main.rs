@@ -3,11 +3,15 @@
 use crate::ids::{ChunkID, ID};
 use clap::{Args, Parser, Subcommand};
 use futures::io::AsyncWriteExt;
+use futures::sink::SinkExt;
 use futures::stream::{iter, StreamExt, TryStreamExt};
-use std::cell::RefCell;
+use sha2::{Digest, Sha256};
+use std::cell::{Cell, RefCell};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::pin::{pin, Pin};
 use tokio::runtime::Builder;
+use tokio::sync::mpsc::{channel, Receiver};
 use vinculum::backends::files::{initialize, FileBackend};
 use vinculum::{
     ClientBackend, FossilCollection, FossilCollectionBuilder, Manifest, ManifestTimestamp,
@@ -107,6 +111,49 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Command::Init(args) => initialize(&args.repository).unwrap(),
+        Command::Create(args) => {
+            let chunk_size: usize = args.chunk_size.try_into().unwrap();
+            let mut file = std::fs::File::open(args.path).unwrap();
+            let repository = FileBackend::new(args.repository);
+            let (sender, receiver) = channel::<Option<(ChunkID, Vec<u8>)>>(32);
+            let upload_thread = std::thread::spawn(move || {
+                let runtime = create_runtime();
+                runtime.block_on(create_manifest(
+                    &repository,
+                    args.parallelism.into(),
+                    &ID::new(args.manifest),
+                    &ID::new(args.client),
+                    receiver,
+                ));
+            });
+
+            let take_amount: u64 = chunk_size.try_into().unwrap();
+            let mut hasher = Sha256::new();
+            loop {
+                let mut buffer = Vec::with_capacity(chunk_size);
+                let read = file
+                    .by_ref()
+                    .take(take_amount)
+                    .read_to_end(&mut buffer)
+                    .unwrap();
+                if read == 0 {
+                    break;
+                }
+                hasher.update(buffer.as_slice());
+                let digest: [u8; 32] = hasher.finalize_reset().into();
+                sender
+                    .blocking_send(Some((ChunkID::new(digest), buffer)))
+                    .unwrap();
+                if read < chunk_size {
+                    break;
+                }
+            }
+
+            // tell the uploader that we did not panic
+            sender.blocking_send(None).unwrap();
+            std::mem::drop(sender);
+            upload_thread.join().unwrap();
+        }
         Command::Collect(args) => {
             let repository = FileBackend::new(args.repository);
             let runtime = create_runtime();
@@ -152,12 +199,54 @@ fn main() {
                 .block_on(repository.remove_client(&ID::new(args.client)))
                 .unwrap();
         }
-        _ => unimplemented!(),
     };
 }
 
 fn create_runtime() -> tokio::runtime::Runtime {
     Builder::new_current_thread().build().unwrap()
+}
+
+#[allow(clippy::await_holding_refcell_ref)]
+async fn create_manifest<R>(
+    repository: &R,
+    parallelism: usize,
+    name: &ID,
+    client: &ID,
+    receiver: Receiver<Option<(ChunkID, Vec<u8>)>>,
+) where
+    R: Repository<ID, ID, ChunkID>,
+{
+    let mut builder = pin!(repository.create_manifest(name, client).await.unwrap());
+    let completed = Cell::new(false);
+    let builder_cell = RefCell::new(builder.as_mut());
+    tokio_stream::wrappers::ReceiverStream::new(receiver)
+        .filter_map(|msg| async {
+            match msg {
+                Some((id, chunk)) => {
+                    // triggers clippy::await_holding_refcell_ref but is ok
+                    // since at most one instance is running at a time
+                    let mut builder = builder_cell.borrow_mut();
+                    builder.feed(&id).await.unwrap();
+                    Some((id, chunk))
+                }
+                None => {
+                    completed.set(true);
+                    None
+                }
+            }
+        })
+        .for_each_concurrent(parallelism, |(id, chunk)| async move {
+            if !repository.has_chunk(&id).await.unwrap() {
+                let mut writer = pin!(repository.add_chunk(&id).await.unwrap());
+                writer.write_all(chunk.as_slice()).await.unwrap();
+                writer.close().await.unwrap();
+            }
+        })
+        .await;
+    // make sure that the chunker did not panic
+    if completed.get() {
+        builder.close().await.unwrap();
+    }
 }
 
 fn store_collection(collection: &FossilCollection<ID, ChunkID>, path: &Path) {
