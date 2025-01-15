@@ -249,8 +249,9 @@ pub trait ManifestTimestamp<E> {
 
 /// Trait representing a manifest creation process with the type of chunk Id as a generic parameter.
 ///
-/// It receives chunks which where added to the repository by the user beforehand,
-/// either by uploading them or making sure they already exists.
+/// It receives chunks which will be added to the repository by the user before
+/// the manifest will be created, either by uploading them or making sure they
+/// already exist.
 ///
 /// A backend can not depend on the list of chunks being complete.
 /// Middlewares can encode additional chunks in the additional data or
