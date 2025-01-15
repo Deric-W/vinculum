@@ -19,6 +19,8 @@ use vinculum::{
 };
 
 mod ids;
+#[cfg(test)]
+mod tests;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
