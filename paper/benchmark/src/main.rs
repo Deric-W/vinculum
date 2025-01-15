@@ -28,10 +28,8 @@ struct Cli {
 enum Command {
     /// Create an repository
     Init(InitArgs),
-    /// Create an new manifest
+    /// Create an new manifest from a single file
     Create(CreateArgs),
-    /// Extract a manifest
-    Extract(ExtractArgs),
     /// Create a fossil collection
     Collect(CollectArgs),
     /// Delete a fossil collection
@@ -54,29 +52,18 @@ struct CreateArgs {
     repository: PathBuf,
     /// The name of the new manifest
     manifest: String,
-    /// Paths to include in the manifest
-    paths: Vec<PathBuf>,
+    /// The client creating the manifest
+    client: String,
+    /// File containing the chunks of the manifest
+    path: PathBuf,
     /// Size of the generated chunks
-    #[arg(long)]
-    chunk_size: Option<usize>,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    #[clap(default_value_t = 4096)]
+    chunk_size: u64,
     /// Number of operations to perform in parallel
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     #[clap(default_value_t = 1)]
-    parallelism: usize,
-}
-
-#[derive(Args)]
-struct ExtractArgs {
-    /// The path of the repository
-    repository: PathBuf,
-    /// The name of the manifest
-    manifest: String,
-    /// Directory for the extracted files
-    destionation: PathBuf,
-    /// Number of operations to perform in parallel
-    #[arg(long)]
-    #[clap(default_value_t = 1)]
-    parallelism: usize,
+    parallelism: u16,
 }
 
 #[derive(Args)]
@@ -88,9 +75,9 @@ struct CollectArgs {
     /// Manifests to delete
     manifests: Vec<String>,
     /// Number of operations to perform in parallel
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     #[clap(default_value_t = 1)]
-    parallelism: usize,
+    parallelism: u16,
 }
 
 #[derive(Args)]
@@ -100,9 +87,9 @@ struct DeleteArgs {
     /// Path to the fossil collection being deleted
     collection: PathBuf,
     /// Number of operations to perform in parallel
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     #[clap(default_value_t = 1)]
-    parallelism: usize,
+    parallelism: u16,
     /// Manifests to delete during pipelined collection
     #[arg(long)]
     collect: Vec<String>,
@@ -125,7 +112,7 @@ fn main() {
             let runtime = create_runtime();
             let collection = runtime.block_on(collect_fossils(
                 &repository,
-                args.parallelism,
+                args.parallelism.into(),
                 args.manifests.into_iter().map(ID::new),
             ));
             store_collection(&collection, &args.collection);
@@ -136,13 +123,13 @@ fn main() {
             let runtime = create_runtime();
             if args.collect.is_empty() {
                 runtime
-                    .block_on(collection.delete::<_, ID>(&repository, args.parallelism))
+                    .block_on(collection.delete::<_, ID>(&repository, args.parallelism.into()))
                     .unwrap();
                 std::fs::remove_file(args.collection).unwrap();
             } else {
                 let collection = runtime.block_on(pipelined_delete(
                     &repository,
-                    args.parallelism,
+                    args.parallelism.into(),
                     collection,
                     args.collect.into_iter().map(ID::new),
                 ));
