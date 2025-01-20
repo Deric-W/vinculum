@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ChunkID {
     inner: [u8; 32],
 }
@@ -33,6 +34,7 @@ impl From<&ChunkID> for OsString {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ID {
     inner: String,
 }
