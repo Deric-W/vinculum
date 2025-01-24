@@ -24,6 +24,9 @@ ARGS.add_argument(
     default=sys.stdout,
     help="Output file",
 )
+ARGS.add_argument(
+    "-c", "--chunk-size", type=int, default=1048576, help="Chunk size in bytes"
+)
 ARGS.add_argument("--borg1", type=str, default="borg", help="Borg1 executable")
 ARGS.add_argument("--borg2", type=str, default="borg", help="Borg2 executable")
 for i in ("chunks", "manifests"):
@@ -63,7 +66,7 @@ def create_borg1_manifest(name: str, args: Namespace) -> subprocess.Popen:
             args.borg1,
             "create",
             "--compression=none",
-            "--chunker-params=fixed,64",
+            f"--chunker-params=fixed,{args.chunk_size}",
             f"{args.location / 'borg1_repo'}::{name}",
             file,
         ),
@@ -122,7 +125,7 @@ def create_borg2_manifest(name: str, args: Namespace) -> subprocess.Popen:
             "--repo",
             args.location / "borg2_repo",
             "--compression=none",
-            "--chunker-params=fixed,64",
+            f"--chunker-params=fixed,{args.chunk_size}",
             name,
             file,
         ),
@@ -166,11 +169,11 @@ def setup_duplicacy(args: Namespace) -> None:
             "-repository",
             args.location / "dataset",
             "-c",
-            "64",
+            str(args.chunk_size),
             "-min",
-            "64",
+            str(args.chunk_size),
             "-max",
-            "64",
+            str(args.chunk_size),
             "benchmark",
             storage.absolute(),
         ),
@@ -261,7 +264,7 @@ def create_vinculum_manifest(name: str, args: Namespace) -> subprocess.Popen:
             "benchmark",
             file,
             "--chunk-size",
-            "64",
+            str(args.chunk_size),
         ),
         stdout=sys.stderr,
     )
@@ -317,12 +320,14 @@ def prune_vinculum_manifest(name: str, args: Namespace) -> tuple[int, int]:
 def create_manifests(chunks: int, manifests: int, args: Namespace) -> None:
     assert manifests > 0
     path = args.location / "dataset" / "dataset"
+    manifest_part = args.chunk_size // 2
+    chunk_part = args.chunk_size - manifest_part
     try:
         for manifest in range(manifests):
             with open(path, "wb") as dataset:
                 for chunk in range(chunks // manifests):
-                    dataset.write(manifest.to_bytes(32, "big", signed=False))
-                    dataset.write(chunk.to_bytes(32, "big", signed=False))
+                    dataset.write(manifest.to_bytes(manifest_part, "big", signed=False))
+                    dataset.write(chunk.to_bytes(chunk_part, "big", signed=False))
             processes = []
             try:
                 processes.append(create_borg1_manifest(f"manifest_{manifest}", args))
