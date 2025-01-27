@@ -29,6 +29,11 @@ ARGS.add_argument(
 )
 ARGS.add_argument("--borg1", type=str, default="borg", help="Borg1 executable")
 ARGS.add_argument("--borg2", type=str, default="borg", help="Borg2 executable")
+ARGS.add_argument(
+    "--chunks-per-manifest",
+    action="store_true",
+    help="Treat the number of chunks as per manifest instead of per repository",
+)
 for i in ("chunks", "manifests"):
     ARGS.add_argument(f"--{i}-start", type=int, help=f"Starting number of {i}")
     ARGS.add_argument(f"--{i}-step", type=int, default=1, help=f"Step size of {i}")
@@ -322,10 +327,14 @@ def create_manifests(chunks: int, manifests: int, args: Namespace) -> None:
     path = args.location / "dataset" / "dataset"
     manifest_part = args.chunk_size // 2
     chunk_part = args.chunk_size - manifest_part
+    if args.chunks_per_manifest:
+        chunks_per_manifest = chunks
+    else:
+        chunks_per_manifest = chunks // manifests
     try:
         for manifest in range(manifests):
             with open(path, "wb") as dataset:
-                for chunk in range(chunks // manifests):
+                for chunk in range(chunks_per_manifest):
                     dataset.write(manifest.to_bytes(manifest_part, "big", signed=False))
                     dataset.write(chunk.to_bytes(chunk_part, "big", signed=False))
             processes = []
