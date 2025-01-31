@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from argparse import ArgumentParser, FileType, Namespace
 from collections.abc import Callable
@@ -34,6 +35,13 @@ ARGS.add_argument(
     action="store_true",
     help="Treat the number of chunks as per manifest instead of per repository",
 )
+ARGS.add_argument(
+    "-a",
+    "--auxiliary-dir",
+    type=Path,
+    default=Path(tempfile.gettempdir()),
+    help="Directory for auxiliary files (like caches)",
+)
 for i in ("chunks", "manifests"):
     ARGS.add_argument(f"--{i}-start", type=int, help=f"Starting number of {i}")
     ARGS.add_argument(f"--{i}-step", type=int, default=1, help=f"Step size of {i}")
@@ -53,19 +61,30 @@ def setup_borg1(args: Namespace) -> None:
         shutil.rmtree(repo)
     except FileNotFoundError:
         pass
+    base = args.auxiliary_dir / "borg1_base"
+    try:
+        shutil.rmtree(base)
+    except FileNotFoundError:
+        pass
+    env = dict(os.environ)
+    env["BORG_BASE_DIR"] = str(base)
     subprocess.run(
         (args.borg1, "init", "--encryption=none", repo),
         stdout=sys.stderr,
+        env=env,
         check=True,
     )
     try:
         yield
     finally:
         shutil.rmtree(repo)
+        shutil.rmtree(base)
 
 
 def create_borg1_manifest(name: str, args: Namespace) -> subprocess.Popen:
     (file,) = (args.location / "dataset").iterdir()
+    env = dict(os.environ)
+    env["BORG_BASE_DIR"] = str(args.auxiliary_dir / "borg1_base")
     return subprocess.Popen(
         (
             args.borg1,
@@ -76,14 +95,18 @@ def create_borg1_manifest(name: str, args: Namespace) -> subprocess.Popen:
             file,
         ),
         stdout=sys.stderr,
+        env=env,
     )
 
 
 def prune_borg1_manifest(name: str, args: Namespace) -> tuple[int, int]:
+    env = dict(os.environ)
+    env["BORG_BASE_DIR"] = str(args.auxiliary_dir / "borg1_base")
     deletion = measure_call(
         lambda: subprocess.run(
             (args.borg1, "delete", f"{args.location / 'borg1_repo'}::{name}"),
             stdout=sys.stderr,
+            env=env,
             check=True,
         )
     )
@@ -91,6 +114,7 @@ def prune_borg1_manifest(name: str, args: Namespace) -> tuple[int, int]:
         lambda: subprocess.run(
             (args.borg1, "compact", args.location / "borg1_repo"),
             stdout=sys.stderr,
+            env=env,
             check=True,
         )
     )
@@ -104,6 +128,13 @@ def setup_borg2(args: Namespace) -> None:
         shutil.rmtree(repo)
     except FileNotFoundError:
         pass
+    base = args.auxiliary_dir / "borg2_base"
+    try:
+        shutil.rmtree(base)
+    except FileNotFoundError:
+        pass
+    env = dict(os.environ)
+    env["BORG_BASE_DIR"] = str(base)
     subprocess.run(
         (
             args.borg2,
@@ -113,16 +144,20 @@ def setup_borg2(args: Namespace) -> None:
             "--encryption=none",
         ),
         stdout=sys.stderr,
+        env=env,
         check=True,
     )
     try:
         yield
     finally:
         shutil.rmtree(repo)
+        shutil.rmtree(base)
 
 
 def create_borg2_manifest(name: str, args: Namespace) -> subprocess.Popen:
     (file,) = (args.location / "dataset").iterdir()
+    env = dict(os.environ)
+    env["BORG_BASE_DIR"] = str(args.auxiliary_dir / "borg2_base")
     return subprocess.Popen(
         (
             args.borg2,
@@ -135,14 +170,18 @@ def create_borg2_manifest(name: str, args: Namespace) -> subprocess.Popen:
             file,
         ),
         stdout=sys.stderr,
+        env=env,
     )
 
 
 def prune_borg2_manifest(name: str, args: Namespace) -> tuple[int, int]:
+    env = dict(os.environ)
+    env["BORG_BASE_DIR"] = str(args.auxiliary_dir / "borg2_base")
     deletion = measure_call(
         lambda: subprocess.run(
             (args.borg2, "delete", "--repo", args.location / "borg2_repo", name),
             stdout=sys.stderr,
+            env=env,
             check=True,
         )
     )
@@ -150,6 +189,7 @@ def prune_borg2_manifest(name: str, args: Namespace) -> tuple[int, int]:
         lambda: subprocess.run(
             (args.borg2, "compact", "--repo", args.location / "borg2_repo"),
             stdout=sys.stderr,
+            env=env,
             check=True,
         )
     )
@@ -163,8 +203,13 @@ def setup_duplicacy(args: Namespace) -> None:
         shutil.rmtree(storage)
     except FileNotFoundError:
         pass
+    prefs = args.auxiliary_dir / "duplicacy_prefs"
     try:
-        shutil.rmtree(Path.cwd() / ".duplicacy")
+        shutil.rmtree(prefs)
+    except FileNotFoundError:
+        pass
+    try:
+        os.unlink(Path.cwd() / ".duplicacy")
     except FileNotFoundError:
         pass
     subprocess.run(
@@ -173,6 +218,8 @@ def setup_duplicacy(args: Namespace) -> None:
             "init",
             "-repository",
             args.location / "dataset",
+            "-pref-dir",
+            str(prefs),
             "-c",
             str(args.chunk_size),
             "-min",
@@ -192,8 +239,9 @@ def setup_duplicacy(args: Namespace) -> None:
         (storage / "config").write_text(json.dumps(config), encoding="utf8")
         yield
     finally:
+        os.unlink(Path.cwd() / ".duplicacy")
         shutil.rmtree(storage)
-        shutil.rmtree(Path.cwd() / ".duplicacy")
+        shutil.rmtree(prefs)
 
 
 def create_duplicacy_manifest() -> subprocess.Popen:
