@@ -1,0 +1,200 @@
+\documentclass[english,utf8,aspectratio=169]{beamer}
+\usetheme{tud}
+\usecolortheme{tud}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}  
+\usepackage{pgffor}
+
+\AtBeginSection[]{\partpage{\usebeamertemplate***{part page}}}
+
+\title{Vinculum}
+\subtitle{Benchmark results}
+\author{Eric Niklas Wolf}
+\institut{Chair of Distributed and Networked Systems}
+
+\begin{document}
+    \maketitle
+
+    \begin{frame}
+        \frametitle{Outline}
+        \tableofcontents
+    \end{frame}
+
+    \section{VM Images}
+    \begin{frame}
+        \frametitle{Setup}
+        \begin{itemize}
+            \item three VM Images where backed up (like in the paper) with a fixed chunk size of one MiB
+            \item they where prunned beginning with the oldest manifest
+            \item the time required for the pruning commands to complete was recorded
+            \item in all four programs deletion happens in two phases:
+            \begin{enumerate}
+                \item deletion of the manifest (borg delete or fossil collection, blue bar)
+                \item freeing of now unused disk space (borg compact or fossil deletion, red bar)
+            \end{enumerate}
+        \end{itemize}
+    \end{frame}
+
+    \begin{frame}
+        \frametitle{Results}
+        \begin{center}
+            \begin{tikzpicture}
+                \pgfplotsset{every axis/.style={
+                    ybar stacked,
+                    ymin=0,ymax=170,
+                    xtick=data,
+                    symbolic x coords={
+                        Borg1,
+                        Borg2,
+                        Duplicacy,
+                        Vinculum
+                    },
+                    bar width=8pt,
+                    table/col sep=comma,
+                    height=.9\textheight
+                }}
+                \begin{axis}[hide axis,bar shift=-10pt]
+                    \addplot table [x=tool,y=ubuntu_setup1] {benchmark/results/vm_images.csv};
+                    \addplot table [x=tool,y=ubuntu_setup2] {benchmark/results/vm_images.csv};
+                \end{axis}
+        
+                \begin{axis}[hide axis]
+                    \addplot table [x=tool,y=ubuntu_tools1] {benchmark/results/vm_images.csv};
+                    \addplot table [x=tool,y=ubuntu_tools2] {benchmark/results/vm_images.csv};
+                \end{axis}
+        
+                \begin{axis}[
+                    bar shift=10pt,
+                    xlabel=Program invocations,
+                    ylabel=Runtime in seconds
+                ]
+                    \addplot table [x=tool,y=ubuntu_onoff1] {benchmark/results/vm_images.csv};
+                    \addplot table [x=tool,y=ubuntu_onoff2] {benchmark/results/vm_images.csv};
+                \end{axis}
+            \end{tikzpicture}
+        \end{center}
+    \end{frame}
+    
+    \begin{frame}
+        \frametitle{Results}
+        \begin{center}
+            \begin{tikzpicture}
+                \pgfplotsset{every axis/.style={
+                    ybar stacked,
+                    ymin=0,ymax=3,
+                    xtick=data,
+                    symbolic x coords={
+                        Borg1,
+                        Borg2,
+                        Duplicacy,
+                        Vinculum
+                    },
+                    bar width=8pt,
+                    table/col sep=comma,
+                    restrict x to domain=1:3,
+                    height=.85\textheight
+                }}
+                \begin{axis}[hide axis,bar shift=-10pt]
+                    \addplot table [x=tool,y=ubuntu_setup1] {benchmark/results/vm_images.csv};
+                    \addplot table [x=tool,y=ubuntu_setup2] {benchmark/results/vm_images.csv};
+                \end{axis}
+        
+                \begin{axis}[hide axis]
+                    \addplot table [x=tool,y=ubuntu_tools1] {benchmark/results/vm_images.csv};
+                    \addplot table [x=tool,y=ubuntu_tools2] {benchmark/results/vm_images.csv};
+                \end{axis}
+        
+                \begin{axis}[
+                    bar shift=10pt,
+                    xlabel=Program invocations,
+                    ylabel=Runtime in seconds
+                ]
+                    \addplot table [x=tool,y=ubuntu_onoff1] {benchmark/results/vm_images.csv};
+                    \addplot table [x=tool,y=ubuntu_onoff2] {benchmark/results/vm_images.csv};
+                \end{axis}
+            \end{tikzpicture}
+        \end{center}
+    \end{frame}
+
+    \section{Chunk scaling}
+    \begin{frame}
+        \frametitle{Setup}
+        \begin{itemize}
+            \item created a specific number of chunks divided evenly between four manifests
+            \item the first manifest was pruned
+            \item the time required for the pruning commands to complete was recorded
+            \item repositories where located on a ext4 hard drive and caches on a tmpfs
+        \end{itemize}
+    \end{frame}
+
+    \foreach \f in {64,512,4096,8192,16384,32768,65536,131072,262144,524288}{
+        \begin{frame}
+            \frametitle{Results (chunksize = \f{} bytes)}
+            \begin{center}
+                \begin{tikzpicture}
+                    \pgfplotsset{
+                        table/col sep=comma,
+                        height=.85\textheight
+                    }
+                    \begin{axis}[
+                        xlabel=Number of chunks,
+                        ylabel=Runtime in seconds,
+                        width=0.75\textwidth,
+                        legend pos=outer north east,
+                        scaled x ticks=base 10:-3
+                    ]
+                        \addplot table [x=chunks, y expr=\thisrow{Borg 1 deletion}+\thisrow{Borg 1 compaction}] {benchmark/results/chunks\f.csv};
+                        \addlegendentry{Borg 1}
+                        \addplot table [x=chunks, y expr=\thisrow{Borg 2 deletion}+\thisrow{Borg 2 compaction}] {benchmark/results/chunks\f.csv};
+                        \addlegendentry{Borg 2}
+                        \addplot table [x=chunks, y expr=\thisrow{Duplicacy collection}+\thisrow{Duplicacy deletion}] {benchmark/results/chunks\f.csv};
+                        \addlegendentry{Duplicacy}
+                        \addplot table [x=chunks, y expr=\thisrow{Vinculum collection}+\thisrow{Vinculum deletion}] {benchmark/results/chunks\f.csv};
+                        \addlegendentry{Vinculum}
+                    \end{axis}
+                \end{tikzpicture}
+            \end{center}
+        \end{frame}
+    }
+
+    \section{Manifest scaling}
+    \begin{frame}
+        \frametitle{Setup}
+        \begin{itemize}
+            \item created a fixed number of chunks divided evenly between a specific number of manifests
+            \item the chunks had a size of 4096 bytes
+            \item the first manifest was pruned
+            \item the time required for the pruning commands to complete was recorded
+            \item repositories where located on a ext4 hard drive and caches on a tmpfs
+        \end{itemize}
+    \end{frame}
+
+    \foreach \f in {0,1,1000}{
+        \begin{frame}
+            \frametitle{Results (total chunks = \f)}
+            \begin{center}
+                \begin{tikzpicture}
+                    \pgfplotsset{
+                        table/col sep=comma,
+                        height=.85\textheight
+                    }
+                    \begin{axis}[
+                        xlabel=Number of manifests,
+                        ylabel=Runtime in seconds,
+                        width=0.75\textwidth,
+                        legend pos=outer north east
+                    ]
+                        \addplot table [x=manifests, y expr=\thisrow{Borg 1 deletion}+\thisrow{Borg 1 compaction}] {benchmark/results/manifests\f const.csv};
+                        \addlegendentry{Borg 1}
+                        \addplot table [x=manifests, y expr=\thisrow{Borg 2 deletion}+\thisrow{Borg 2 compaction}] {benchmark/results/manifests\f const.csv};
+                        \addlegendentry{Borg 2}
+                        \addplot table [x=manifests, y expr=\thisrow{Duplicacy collection}+\thisrow{Duplicacy deletion}] {benchmark/results/manifests\f const.csv};
+                        \addlegendentry{Duplicacy}
+                        \addplot table [x=manifests, y expr=\thisrow{Vinculum collection}+\thisrow{Vinculum deletion}] {benchmark/results/manifests\f const.csv};
+                        \addlegendentry{Vinculum}
+                    \end{axis}
+                \end{tikzpicture}
+            \end{center}
+        \end{frame}
+    }
+\end{document}
