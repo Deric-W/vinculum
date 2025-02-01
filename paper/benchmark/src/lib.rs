@@ -1,7 +1,9 @@
-//! ID types
+//! ID types and functions used by tests.
 
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
+use std::path::Path;
+use vinculum::FossilCollection;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -60,4 +62,13 @@ impl From<&ID> for OsString {
     fn from(value: &ID) -> Self {
         value.inner.clone().into()
     }
+}
+
+pub fn load_collection(path: &Path) -> FossilCollection<ID, ChunkID> {
+    let file = std::fs::OpenOptions::new().read(true).open(path).unwrap();
+    ciborium::from_reader_with_buffer(
+        std::io::BufReader::new(file),
+        &mut vec![0; 65536].into_boxed_slice(),
+    )
+    .unwrap()
 }

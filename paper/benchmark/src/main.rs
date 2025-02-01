@@ -1,6 +1,5 @@
 //! A simple frontend for benchmark purposes.
 
-use crate::ids::{ChunkID, ID};
 use clap::{Args, Parser, Subcommand};
 use futures::io::AsyncWriteExt;
 use futures::sink::SinkExt;
@@ -17,10 +16,7 @@ use vinculum::{
     ClientBackend, FossilCollection, FossilCollectionBuilder, Manifest, ManifestTimestamp,
     Repository,
 };
-
-mod ids;
-#[cfg(test)]
-mod tests;
+use vinculum_benchmark::{load_collection, ChunkID, ID};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -259,15 +255,6 @@ fn store_collection(collection: &FossilCollection<ID, ChunkID>, path: &Path) {
         .open(path)
         .unwrap();
     ciborium::into_writer(collection, std::io::BufWriter::new(file)).unwrap();
-}
-
-fn load_collection(path: &Path) -> FossilCollection<ID, ChunkID> {
-    let file = std::fs::OpenOptions::new().read(true).open(path).unwrap();
-    ciborium::from_reader_with_buffer(
-        std::io::BufReader::new(file),
-        &mut vec![0; 65536].into_boxed_slice(),
-    )
-    .unwrap()
 }
 
 async fn download_manifest_chunks<R, F>(

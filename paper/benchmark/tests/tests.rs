@@ -1,7 +1,5 @@
 //! Tests
 
-use crate::ids::{ChunkID, ID};
-use crate::load_collection;
 use assert_cmd::prelude::*;
 use futures::io::AsyncReadExt;
 use futures::io::AsyncWriteExt;
@@ -18,6 +16,7 @@ use std::time::SystemTime;
 use tempfile::tempdir;
 use vinculum::backends::files::{initialize, FileBackend};
 use vinculum::{ChunkBackend, ClientBackend, Manifest, ManifestTimestamp, Repository};
+use vinculum_benchmark::{load_collection, ChunkID, ID};
 
 fn create_repository(tmpdir: &Path) -> FileBackend {
     initialize(tmpdir).unwrap();
