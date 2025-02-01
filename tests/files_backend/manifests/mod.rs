@@ -37,9 +37,9 @@ impl TryFrom<&[u8]> for BigID {
     }
 }
 
-impl Into<OsString> for &BigID {
-    fn into(self) -> OsString {
-        let mut hexbytes = hex::encode(self.inner);
+impl From<&BigID> for OsString {
+    fn from(val: &BigID) -> Self {
+        let mut hexbytes = hex::encode(val.inner);
         hexbytes.push('x');
         hexbytes.into()
     }
@@ -62,10 +62,10 @@ impl TryFrom<&[u8]> for SmallID {
     }
 }
 
-impl Into<OsString> for &SmallID {
-    fn into(self) -> OsString {
+impl From<&SmallID> for OsString {
+    fn from(val: &SmallID) -> Self {
         let mut string = String::with_capacity(1);
-        string.push(self.inner.into());
+        string.push(val.inner.into());
         string.into()
     }
 }

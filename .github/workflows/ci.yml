@@ -32,7 +32,7 @@ jobs:
     - name: Lint
       run: |
         cargo fmt --all --check
-        cargo clippy -- -D warnings
+        cargo clippy --workspace --no-deps --all-features --all-targets -- -D warnings
 
     - name: Install Tarpaulin
       run: cargo install cargo-tarpaulin --no-default-features
@@ -70,7 +70,7 @@ jobs:
     - name: Lint
       run: |
         cargo fmt --all --check
-        cargo clippy -- -D warnings
+        cargo clippy --workspace --no-deps --all-features --all-targets -- -D warnings
 
     - name: Build & Test (without coverage)
       run: cargo test --verbose --all-features

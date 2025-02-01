@@ -1,9 +1,7 @@
 //! Tests for fossil collection.
 
 use super::{create_chunks, create_manifest, create_repository};
-use crate::ID;
-use futures::stream::TryStreamExt;
-use std::collections::HashSet;
+use crate::{assert_chunks, assert_eq_unordered, assert_fossils, ID};
 use std::iter::Iterator;
 use std::time::SystemTime;
 use tempfile::tempdir;
@@ -25,39 +23,17 @@ async fn create_fossils() {
     let before = SystemTime::now();
     let fossil_collection = builder.collect_fossils(&repository, 3).await.unwrap();
     let after = SystemTime::now();
-    let repository_chunks: HashSet<ID> = repository
-        .chunks()
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
-    let repository_fossils: HashSet<ID> = repository
-        .fossils()
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
 
     assert_eq!(fossil_collection.fossils(), 5);
-    assert_eq!(
-        fossil_collection.iter_fossils().collect::<HashSet<&ID>>(),
-        chunks[5..].iter().collect::<HashSet<&ID>>()
-    );
+    assert_eq_unordered(fossil_collection.iter_fossils(), chunks[5..].iter());
     assert_eq!(fossil_collection.seen_manifests(), 1);
-    assert!(fossil_collection
-        .iter_seen_manifests()
-        .eq([&manifest].into_iter()));
+    assert_eq_unordered(
+        fossil_collection.iter_seen_manifests(),
+        [&manifest].into_iter(),
+    );
     assert!(fossil_collection.has_seen_manifest(&manifest));
-    assert_eq!(
-        repository_chunks,
-        chunks[..5].iter().cloned().collect::<HashSet<ID>>()
-    );
-    assert_eq!(
-        repository_fossils,
-        chunks[5..].iter().cloned().collect::<HashSet<ID>>()
-    );
+    assert_chunks(&repository, chunks[..5].iter().cloned()).await;
+    assert_fossils(&repository, chunks[5..].iter().cloned()).await;
     assert!(before < fossil_collection.timestamp());
     assert!(fossil_collection.timestamp() < after);
 }
@@ -71,51 +47,40 @@ async fn remove_fossil_candidates() {
     let manifest = ID { inner: [42; 32] };
     create_manifest(&repository, &manifest, &manifest, &chunks[..5]).await;
     let mut builder = FossilCollectionBuilder::new();
+    builder.add_referenced_chunk(chunks[7].clone());
     for chunk in &chunks[5..] {
         builder.add_fossil_candidate(chunk.clone());
     }
     builder.add_seen_manifest(manifest.clone());
-    builder.remove_fossil_candidate(&chunks[8]);
-    let fossil_collection = builder.collect_fossils(&repository, 1).await.unwrap();
-    let repository_chunks: HashSet<ID> = repository
-        .chunks()
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
-    let repository_fossils: HashSet<ID> = repository
-        .fossils()
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
+    builder.add_referenced_chunk(chunks[8].clone());
 
-    assert_eq!(
-        fossil_collection.iter_fossils().collect::<HashSet<&ID>>(),
-        [5, 6, 7, 9]
-            .into_iter()
-            .map(|i| &chunks[i])
-            .collect::<HashSet<&ID>>()
+    assert_eq!(builder.referenced_chunks(), 2);
+    assert_eq_unordered(builder.iter_referenced_chunks(), chunks[7..9].iter());
+    assert_eq!(builder.fossil_candidates(), 3);
+    assert_eq_unordered(
+        builder.iter_fossil_candidates(),
+        [5, 6, 9].into_iter().map(|i| &chunks[i]),
+    );
+
+    let fossil_collection = builder.collect_fossils(&repository, 1).await.unwrap();
+
+    assert_eq_unordered(
+        fossil_collection.iter_fossils(),
+        [5, 6, 9].into_iter().map(|i| &chunks[i]),
     );
     assert!(fossil_collection
         .iter_seen_manifests()
         .eq([manifest].iter()));
-    assert_eq!(
-        repository_chunks,
-        [0, 1, 2, 3, 4, 8]
-            .into_iter()
-            .map(|i| chunks[i].clone())
-            .collect::<HashSet<ID>>()
-    );
-    assert_eq!(
-        repository_fossils,
-        [5, 6, 7, 9]
-            .into_iter()
-            .map(|i| chunks[i].clone())
-            .collect::<HashSet<ID>>()
-    );
+    assert_chunks(
+        &repository,
+        [0, 1, 2, 3, 4, 7, 8].into_iter().map(|i| chunks[i].clone()),
+    )
+    .await;
+    assert_fossils(
+        &repository,
+        [5, 6, 9].into_iter().map(|i| chunks[i].clone()),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -137,35 +102,12 @@ async fn collect_all_fossils() {
     let before = SystemTime::now();
     let fossil_collection = builder.collect_all_fossils(&repository, 1).await.unwrap();
     let after = SystemTime::now();
-    let repository_chunks: HashSet<ID> = repository
-        .chunks()
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
-    let repository_fossils: HashSet<ID> = repository
-        .fossils()
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
 
     assert_eq!(fossil_collection.fossils(), 6);
-    assert_eq!(
-        fossil_collection.iter_fossils().collect::<HashSet<&ID>>(),
-        chunks[5..].iter().collect::<HashSet<&ID>>()
-    );
+    assert_eq_unordered(fossil_collection.iter_fossils(), chunks[5..].iter());
     assert_eq!(fossil_collection.seen_manifests(), 0);
-    assert_eq!(
-        repository_chunks,
-        chunks[..5].iter().cloned().collect::<HashSet<ID>>()
-    );
-    assert_eq!(
-        repository_fossils,
-        chunks[5..].iter().cloned().collect::<HashSet<ID>>()
-    );
+    assert_chunks(&repository, chunks[..5].iter().cloned()).await;
+    assert_fossils(&repository, chunks[5..].iter().cloned()).await;
     assert!(before < fossil_collection.timestamp());
     assert!(fossil_collection.timestamp() < after);
 }
@@ -189,13 +131,7 @@ fn merge_collections() {
     collection1.merge(collection2);
 
     assert_eq!(collection1.fossils(), fossils.len());
-    assert_eq!(
-        collection1.iter_fossils().collect::<HashSet<&ID>>(),
-        fossils.iter().collect::<HashSet<&ID>>()
-    );
-    assert_eq!(
-        collection1.iter_seen_manifests().collect::<HashSet<&ID>>(),
-        manifests[2..8].iter().collect::<HashSet<&ID>>()
-    );
+    assert_eq_unordered(collection1.iter_fossils(), fossils.iter());
+    assert_eq_unordered(collection1.iter_seen_manifests(), manifests[2..8].iter());
     assert_eq!(collection1.timestamp(), timestamp2);
 }

@@ -11,42 +11,26 @@ use std::fmt::Debug;
 use std::future::poll_fn;
 use std::pin::{pin, Pin};
 use std::task::{ready, Context, Poll};
+use thiserror::Error;
 
 /// Error produced by manifest encoding operations.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ManifestEncodingError {
     /// An I/O error occurred.
-    IoError(IoError),
+    #[error("I/O error: {0}")]
+    IoError(#[source] IoError),
     /// The length of the creator id exceeds [`u8::MAX`] bytes.
+    #[error("invalid creator")]
     InvalidCreator,
     /// The length of the chunk id exceeds [`u8::MAX`] bytes or is empty.
+    #[error("invalid chunk")]
     InvalidChunk,
     /// Calculating the timestamp failed, containing the difference from [`std::time::UNIX_EPOCH`].
-    InvalidTimestamp(std::time::SystemTimeError),
+    #[error("invalid timestamp: {0}")]
+    InvalidTimestamp(#[source] std::time::SystemTimeError),
     /// Invalid operation (such as adding more chunks after closing the builder).
+    #[error("invalid operation")]
     InvalidOperation,
-}
-
-impl std::fmt::Display for ManifestEncodingError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ManifestEncodingError::IoError(e) => write!(f, "I/O error: {}", e),
-            ManifestEncodingError::InvalidCreator => write!(f, "invalid creator"),
-            ManifestEncodingError::InvalidChunk => write!(f, "invalid chunk"),
-            ManifestEncodingError::InvalidTimestamp(e) => write!(f, "invalid timestamp: {}", e),
-            Self::InvalidOperation => write!(f, "invalid operation"),
-        }
-    }
-}
-
-impl std::error::Error for ManifestEncodingError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ManifestEncodingError::IoError(e) => e.source(),
-            ManifestEncodingError::InvalidTimestamp(e) => e.source(),
-            _ => None,
-        }
-    }
 }
 
 /// State of the manifest chunk encoding process
@@ -94,12 +78,12 @@ impl ManifestBuilder {
                     .as_mut()
                     .write_all(&length.to_be_bytes())
                     .await
-                    .map_err(|e| ManifestEncodingError::IoError(e))?;
+                    .map_err(ManifestEncodingError::IoError)?;
                 pinned
                     .as_mut()
                     .write_all(creator.as_encoded_bytes())
                     .await
-                    .map_err(|e| ManifestEncodingError::IoError(e))?;
+                    .map_err(ManifestEncodingError::IoError)?;
             }
             Err(_) => return Err(ManifestEncodingError::InvalidCreator),
         }
@@ -118,7 +102,7 @@ impl ManifestBuilder {
             let bytes = length.to_be_bytes();
             match ready!(writer.as_mut().poll_write(cx, &bytes)) {
                 Ok(amount) => {
-                    *written = *written + amount;
+                    *written += amount;
                 }
                 Err(e) => return Poll::Ready(Err(ManifestEncodingError::IoError(e))),
             }
@@ -127,7 +111,7 @@ impl ManifestBuilder {
             let bytes = &chunk.as_encoded_bytes()[*written - 1..];
             match ready!(writer.as_mut().poll_write(cx, bytes)) {
                 Ok(amount) => {
-                    *written = *written + amount;
+                    *written += amount;
                 }
                 Err(e) => return Poll::Ready(Err(ManifestEncodingError::IoError(e))),
             }
@@ -145,7 +129,7 @@ impl ManifestBuilder {
         while *written < 3 {
             match ready!(writer.as_mut().poll_write(cx, &[0, 0, 0])) {
                 Ok(amount) => {
-                    *written = *written + amount;
+                    *written += amount;
                 }
                 Err(e) => return Poll::Ready(Err(ManifestEncodingError::IoError(e))),
             }
@@ -153,7 +137,7 @@ impl ManifestBuilder {
         while *written - 3 < 12 {
             match ready!(writer.as_mut().poll_write(cx, timestamp)) {
                 Ok(amount) => {
-                    *written = *written + amount;
+                    *written += amount;
                 }
                 Err(e) => return Poll::Ready(Err(ManifestEncodingError::IoError(e))),
             }
@@ -216,7 +200,7 @@ where
                 _ => {
                     return Poll::Ready(
                         ready!(this.writer.as_mut().poll_flush(cx))
-                            .map_err(|e| ManifestEncodingError::IoError(e)),
+                            .map_err(ManifestEncodingError::IoError),
                     )
                 }
             }
@@ -253,7 +237,7 @@ where
                 ChunksEncodingState::Finished => {
                     return Poll::Ready(
                         ready!(this.writer.as_mut().poll_close(cx))
-                            .map_err(|e| ManifestEncodingError::IoError(e)),
+                            .map_err(ManifestEncodingError::IoError),
                     )
                 }
             }
@@ -277,11 +261,11 @@ where
                     writer
                         .write_all(&[0])
                         .await
-                        .map_err(|e| ManifestEncodingError::IoError(e))?;
+                        .map_err(ManifestEncodingError::IoError)?;
                     writer
                         .flush()
                         .await
-                        .map_err(|e| ManifestEncodingError::IoError(e))?;
+                        .map_err(ManifestEncodingError::IoError)?;
                     return Ok(ManifestBuilderData::new(self.writer.into_inner()));
                 }
                 ChunksEncodingState::ChunkPending(ref chunk, ref mut written) => {
@@ -345,7 +329,7 @@ impl ManifestBuilderData {
             let bytes = &buf[*written..length];
             match ready!(writer.as_mut().poll_write(cx, bytes)) {
                 Ok(amount) => {
-                    *written = *written + amount;
+                    *written += amount;
                 }
                 Err(e) => return Poll::Ready(Err(e)),
             }
@@ -364,7 +348,7 @@ impl AsyncWrite for ManifestBuilderData {
                     let dst = &mut this.buf[*length..*length + consumed];
                     let src = &buf[..consumed];
                     dst.copy_from_slice(src);
-                    *length = *length + consumed;
+                    *length += consumed;
                     return Poll::Ready(Ok(consumed));
                 }
                 DataEncodingState::Accumulating(length) => {

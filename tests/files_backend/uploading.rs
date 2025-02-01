@@ -33,15 +33,13 @@ async fn moves_file_on_commit() {
 
     upload.close().await.unwrap();
 
-    assert!(matches!(
-        backend
-            .directory()
-            .join("incoming")
-            .read_dir()
-            .unwrap()
-            .next(),
-        None
-    ));
+    assert!(backend
+        .directory()
+        .join("incoming")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_none());
     assert!(chunks_path.is_file());
 }
 
@@ -80,15 +78,13 @@ async fn removes_file_on_drop() {
         upload.write_all(&[0; 32]).await.unwrap();
     }
 
-    assert!(matches!(
-        backend
-            .directory()
-            .join("incoming")
-            .read_dir()
-            .unwrap()
-            .next(),
-        None
-    ));
+    assert!(backend
+        .directory()
+        .join("incoming")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_none());
     assert!(!chunks_path.is_file());
 }
 
@@ -104,24 +100,20 @@ async fn removes_file_on_drop_after_pending_close() {
     {
         let mut upload = pin!(backend.add_chunk(&chunk).await.unwrap());
 
-        assert!(matches!(
-            PollOnce {
-                inner: upload.close()
-            }
-            .await,
-            None
-        ));
+        assert!(PollOnce {
+            inner: upload.close()
+        }
+        .await
+        .is_none());
     }
 
-    assert!(matches!(
-        backend
-            .directory()
-            .join("incoming")
-            .read_dir()
-            .unwrap()
-            .next(),
-        None
-    ));
+    assert!(backend
+        .directory()
+        .join("incoming")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_none());
     assert!(!chunks_path.is_file());
 }
 
@@ -148,15 +140,13 @@ async fn removes_file_on_rename_failure() {
         std::fs::DirBuilder::new().create(&chunks_path).unwrap();
 
         assert!(matches!(upload.close().await, Err(e) if e.kind() == ErrorKind::IsADirectory));
-        assert!(matches!(
-            backend
-                .directory()
-                .join("incoming")
-                .read_dir()
-                .unwrap()
-                .next(),
-            None
-        ));
+        assert!(backend
+            .directory()
+            .join("incoming")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_none());
 
         // test that the file is not removed twice on drop
         std::fs::File::create_new(upload_path).unwrap();
