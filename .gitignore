@@ -23,3 +23,4 @@ Cargo.lock
 # latexmk aux directory and build products
 paper/build
 paper/*.pdf
+paper/*-textidote.html

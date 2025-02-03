@@ -64,7 +64,7 @@
         \begin{theorem}
             The proof that some processes running the fossil collection step while others run the
             fossil deletion step is lock-free~\cite[Theorem 1, Case 3]{Duplicacy} is flawed since
-            the processes can influence eachother by operating on the same chunk or fossil.
+            the processes can influence each other by operating on the same chunk or fossil.
         \end{theorem}
         \begin{proof}
             Since both steps operate on both fossils and chunks (by renaming between the two) and
@@ -114,7 +114,7 @@
         \begin{proof}
             \begin{enumerate}
                 \item Should it revert a fossil recovery the fossil was once determined to be referenced
-                    by a fossil deletion step and should therefore only be fossilised after the
+                    by a fossil deletion step and should therefore only be fossilized after the
                     referencing manifest files seen by the fossil deletion step where either removed
                     or selected to be pruned by the fossil collection step.
                     Since the fossil deletion step completed before the fossil collection step started
@@ -137,7 +137,7 @@
                 \item Should the fossil deletion step delete a fossil it should only do so when there is no
                     archive still referencing it.
                     Since the fossil deletion step can only receive a fossil from its fossil collection
-                    step or one before it it can only start after Policy 3~\cite{Duplicacy} ensures no
+                    step or one before it, it can only start after Policy 3~\cite{Duplicacy} ensures no
                     new archive can reference fossils created before its fossil collection step ended and
                     therefore any archive still referencing the fossil will be seen by it.
             \end{enumerate}
@@ -162,12 +162,12 @@
         \begin{itemize}
             \item Lock-Free Deduplication requires an operation to retrieve all manifest
                 files~\cite[Operation `downloadAllManifestFiles']{Duplicacy}
-            \item on backends like POSIX filesystems this operation is split into listing
+            \item on backends like POSIX file systems this operation is split into listing
                 all files and accessing them
             \item changes to a directory during listing may not be picked up
             \item accessing files may itself be a non-atomic operation (chunked manifests)
             \item since manifest files can be deleted at any time by a concurrently running
-                pruning operation accessing listed files can fail because they where deleted
+                pruning operation accessing listed files can fail because they were deleted
         \end{itemize}
     \end{frame}
 
@@ -197,19 +197,19 @@
         \end{columns}
         \vfill
         It will be shown that any guarantees of an atomic implementation used by the algorithm
-        are also provided by an non-atomic operation.
+        are also provided by a non-atomic operation.
     \end{frame}
 
     \begin{frame}
         \frametitle{Proof}
         \begin{proof}
             If a manifest operation happens during the execution of the retrieval operation an atomic
-            implementation can't guarantee whether or not the operation happens before the snapshot
+            implementation can't guarantee whether the operation happens before the snapshot
             or after it, the same as a non-atomic operation.
             The same is true for manifest operations happening before or after the execution of the
             retrieval operation, since a non-atomic operation can not move them before or after the
             snapshot giving them the same visibility when using an atomic operation.
-            The only difference is that the non-atomic implementation does not preserves the ordering
+            The only difference is that the non-atomic implementation does not preserve the ordering
             between different manifest operations happening during the execution of the retrieval operation,
             which is not used by the algorithm and it is assumed the clients won't either.
         \end{proof}
@@ -232,7 +232,7 @@
             which may still reference the fossils.
         \end{theorem}
         \begin{proof}
-            Assuming an manifest which references the fossils is not seen by the retrieval operation.
+            Assuming a manifest which references the fossils is not seen by the retrieval operation.
             Since it has to be created before the manifest satisfying Policy 3 for its
             client~\cite[Policy 2]{Duplicacy} it has to be created during the retrieval operation
             and therefore before a following second listing operation.
@@ -302,7 +302,7 @@
             Since Theorem~\ref{theorem:singleclient} limits the amount of pending fossil deletion
             steps to one the chunk may only be recovered once during the access.
             Should the first chunk and fossil access fail because of the fossil being deleted the
-            client will retry one more time before either finding a recreated chunk or determing
+            client will retry one more time before either finding a recreated chunk or determining
             it to be deleted.
             Should it fail because of the fossil being recovered by a fossil deletion step the chunk
             can't be recovered again or deleted during the second access and is therefore found.
@@ -314,7 +314,7 @@
         \frametitle{Sources}
         When creating an archive fails after some chunks where already uploaded they could never be
         referenced again and therefore cleaned up by a fossil collection step.
-        Should a fossil collection step fail after fossilising some chunks or a fossil deletion step
+        Should a fossil collection step fail after fossilizing some chunks or a fossil deletion step
         before either recovering or deleting its fossils they can also exist indefinitely.
         \begin{theorem}
             Assuming there is a way to enumerate all chunks and fossils existing within a repository.
@@ -336,7 +336,7 @@
             the repository as the set of chunks referenced by it and not deleting it after completion.
             Since Theorem~\ref{theorem:singleclient} prevents other fossil collection and deletion
             steps from running in parallel they can not tell the difference between the manifest file
-            being deleted after the pruning operation or it never having been created in the first
+            being deleted after the pruning operation or it never being created in the first
             place.
         \end{proof}
     \end{frame}
@@ -344,7 +344,7 @@
     \begin{frame}
         \frametitle{Proof (unreferenced fossils)}
         \begin{proof}
-            To additionaly remove any unreferenced fossils the list of currently existing fossils
+            To additionally remove any unreferenced fossils the list of currently existing fossils
             has to be added to the produced fossil collection before it ends.
             Since the added fossils existed before the fossil collection step ended the following
             fossil deletion step will only operate on fossils created before its fossil collection
@@ -384,7 +384,7 @@
         \frametitle{Proof}
         \begin{lemma}
             \label{lemma:collectwhileadd}
-            Adding a client will not disrupt fossil collection steps which where running at the
+            Adding a client will not disrupt fossil collection steps which were running at the
             time of his addition.
         \end{lemma}
         \begin{proof}
@@ -403,7 +403,7 @@
         \frametitle{Proof}
         \begin{lemma}
             \label{lemma:deletewhileadd}
-            Adding a client will not disrupt fossil deletions which where running at the time of his
+            Adding a client will not disrupt fossil deletions which were running at the time of his
             addition.
         \end{lemma}
         \begin{proof}

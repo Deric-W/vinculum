@@ -25,7 +25,7 @@
         \frametitle{Setup}
         \begin{itemize}
             \item three VM Images where backed up (like in the paper) with a fixed chunk size of one MiB
-            \item they where prunned beginning with the oldest manifest
+            \item they were pruned beginning with the oldest manifest
             \item the time required for the pruning commands to complete was recorded
             \item in all four programs deletion happens in two phases:
             \begin{enumerate}
@@ -123,13 +123,13 @@
             \item created a specific number of chunks divided evenly between four manifests
             \item the first manifest was pruned
             \item the time required for the pruning commands to complete was recorded
-            \item repositories where located on a ext4 hard drive and caches on a tmpfs
+            \item repositories where located on an ext4 hard drive and caches on a tmpfs
         \end{itemize}
     \end{frame}
 
     \foreach \f in {64,512,4096,8192,16384,32768,65536,131072,262144,524288}{
         \begin{frame}
-            \frametitle{Results (chunksize = \f{} bytes)}
+            \frametitle{Results (chunk size = \f{} bytes)}
             \begin{center}
                 \begin{tikzpicture}
                     \pgfplotsset{
@@ -165,7 +165,7 @@
             \item the chunks had a size of 4096 bytes
             \item the first manifest was pruned
             \item the time required for the pruning commands to complete was recorded
-            \item repositories where located on a ext4 hard drive and caches on a tmpfs
+            \item repositories where located on an ext4 hard drive and caches on a tmpfs
         \end{itemize}
     \end{frame}
 

@@ -9,7 +9,7 @@ INPUTS = $(wildcard sections/*.tex includes/*.tex)
 FIGS = $(wildcard figures/*[^~])
 BIBS = $(wildcard *.bib)
 RESULTS = $(wildcard benchmark/results/*.csv)
-TEX_MACROS = ie,eg,verb,fi,iffalse,crefrange,linebreak
+TEX_MACROS = ie,eg,verb,fi,iffalse,crefrange,linebreak,addplot,textwidth,tableofcontents,vfill,begin,end,setcounter
 LATEXMK_FLAGS = -pdf
 
 ifeq (1,$(FORCE))
