@@ -1,4 +1,4 @@
-//! Tests
+//! Cli Tests
 
 use assert_cmd::prelude::*;
 use futures::io::AsyncReadExt;
@@ -14,23 +14,25 @@ use std::pin::{pin, Pin};
 use std::process::Command;
 use std::time::SystemTime;
 use tempfile::tempdir;
-use vinculum::backends::files::{initialize, FileBackend};
-use vinculum::{ChunkBackend, ClientBackend, Manifest, ManifestTimestamp, Repository};
+use vinculum::{Manifest, Repository};
+use vinculum_benchmark::repository::{initialize, FileRepository};
 use vinculum_benchmark::{load_collection, ChunkID, ID};
 
-fn create_repository(tmpdir: &Path) -> FileBackend {
+fn create_repository(tmpdir: &Path) -> FileRepository<ID, ID, ChunkID> {
     initialize(tmpdir).unwrap();
-    FileBackend::new(tmpdir)
+    FileRepository::new(tmpdir)
 }
 
 fn benchmark_command() -> Command {
     Command::cargo_bin(env!("CARGO_PKG_NAME")).unwrap()
 }
 
-async fn create_dummy_manifest<R>(repository: &R, id: &ID, creator: &ID, chunks: &[ChunkID])
-where
-    R: Repository<ID, ID, ChunkID>,
-{
+async fn create_dummy_manifest(
+    repository: &FileRepository<ID, ID, ChunkID>,
+    id: &ID,
+    creator: &ID,
+    chunks: &[ChunkID],
+) {
     let mut builder = pin!(repository.create_manifest(id, creator).await.unwrap());
     for chunk in chunks {
         builder.feed(chunk).await.unwrap();
@@ -38,10 +40,7 @@ where
     builder.close().await.unwrap();
 }
 
-async fn create_chunks<R>(repository: &R, chunks: &[ChunkID])
-where
-    R: Repository<ID, ID, ChunkID>,
-{
+async fn create_chunks(repository: &FileRepository<ID, ID, ChunkID>, chunks: &[ChunkID]) {
     for chunk in chunks.iter() {
         pin!(repository.add_chunk(chunk).await.unwrap())
             .close()
@@ -101,28 +100,26 @@ async fn create_manifest() {
         .success();
     let after = SystemTime::now();
 
-    let manifests: HashSet<ID> =
-        <FileBackend as Repository<ID, ID, ChunkID>>::manifests(&repository)
-            .await
-            .unwrap()
-            .try_collect()
-            .await
-            .unwrap();
+    let manifests: HashSet<ID> = repository
+        .manifests()
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
     assert_eq!(
         manifests,
         [ID::new("test_manifest".to_owned())].into_iter().collect()
     );
 
-    let (creator, mut chunks) = <FileBackend as Repository<ID, ID, ChunkID>>::manifest(
-        &repository,
-        &ID::new("test_manifest".to_owned()),
-    )
-    .await
-    .unwrap()
-    .into_chunks();
-    assert_eq!(creator, ID::new("test_client".to_owned()));
+    let mut manifest = repository
+        .manifest(&ID::new("test_manifest".to_owned()))
+        .await
+        .unwrap();
+    let manifest_chunks: Vec<ChunkID> = Pin::new(&mut manifest).try_collect().await.unwrap();
+    let (creator, timestamp) = manifest.into_metadata().await.unwrap();
 
-    let manifest_chunks: Vec<ChunkID> = Pin::new(&mut chunks).try_collect().await.unwrap();
+    assert_eq!(creator, ID::new("test_client".to_owned()));
     assert_eq!(
         manifest_chunks,
         (0..10)
@@ -130,7 +127,6 @@ async fn create_manifest() {
             .collect::<Vec<_>>()
     );
 
-    let timestamp = chunks.into_timestamp().await.unwrap();
     assert!(timestamp > before);
     assert!(timestamp < after);
 
@@ -169,17 +165,13 @@ async fn create_manifest_smaller_last_chunk() {
         .assert()
         .success();
 
-    let chunks = pin!(
-        <FileBackend as Repository<ID, ID, ChunkID>>::manifest(
-            &repository,
-            &ID::new("test_manifest".to_owned()),
-        )
+    let manifest_chunks: Vec<ChunkID> = repository
+        .manifest(&ID::new("test_manifest".to_owned()))
         .await
         .unwrap()
-        .into_chunks()
-        .1
-    );
-    let manifest_chunks: Vec<ChunkID> = chunks.try_collect().await.unwrap();
+        .try_collect()
+        .await
+        .unwrap();
     assert_eq!(
         manifest_chunks,
         (0..10)
@@ -242,13 +234,13 @@ async fn collect_manifests() {
         .unwrap();
     assert_eq!(repository_chunks, chunks[..4].iter().cloned().collect());
 
-    let repository_manifests: HashSet<ID> =
-        <FileBackend as Repository<ID, ID, ChunkID>>::manifests(&repository)
-            .await
-            .unwrap()
-            .try_collect()
-            .await
-            .unwrap();
+    let repository_manifests: HashSet<ID> = repository
+        .manifests()
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
     assert_eq!(
         repository_manifests,
         manifests[..1].iter().cloned().collect()
@@ -307,13 +299,13 @@ async fn delete_manifests() {
         .unwrap();
     assert_eq!(repository_chunks, chunks[..7].iter().cloned().collect());
 
-    let repository_manifests: HashSet<ID> =
-        <FileBackend as Repository<ID, ID, ChunkID>>::manifests(&repository)
-            .await
-            .unwrap()
-            .try_collect()
-            .await
-            .unwrap();
+    let repository_manifests: HashSet<ID> = repository
+        .manifests()
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
     assert_eq!(
         repository_manifests,
         manifests[..2].iter().cloned().collect()
@@ -368,13 +360,13 @@ async fn delete_and_collect_manifests() {
         .unwrap();
     assert_eq!(repository_chunks, [].iter().cloned().collect());
 
-    let repository_manifests: HashSet<ID> =
-        <FileBackend as Repository<ID, ID, ChunkID>>::manifests(&repository)
-            .await
-            .unwrap()
-            .try_collect()
-            .await
-            .unwrap();
+    let repository_manifests: HashSet<ID> = repository
+        .manifests()
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
     assert_eq!(repository_manifests, [].iter().cloned().collect());
     assert_eq!(
         repository_manifests,

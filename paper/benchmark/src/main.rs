@@ -11,11 +11,8 @@ use std::path::{Path, PathBuf};
 use std::pin::{pin, Pin};
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver};
-use vinculum::backends::files::{initialize, FileBackend};
-use vinculum::{
-    ClientBackend, FossilCollection, FossilCollectionBuilder, Manifest, ManifestTimestamp,
-    Repository,
-};
+use vinculum::{FossilCollection, FossilCollectionBuilder, Manifest, Repository};
+use vinculum_benchmark::repository::{initialize, FileRepository};
 use vinculum_benchmark::{load_collection, ChunkID, ID};
 
 #[derive(Parser)]
@@ -112,7 +109,7 @@ fn main() {
         Command::Create(args) => {
             let chunk_size: usize = args.chunk_size.try_into().unwrap();
             let mut file = std::fs::File::open(args.path).unwrap();
-            let repository = FileBackend::new(args.repository);
+            let repository = create_repository(args.repository);
             let (sender, receiver) = channel::<Option<(ChunkID, Vec<u8>)>>(32);
             let upload_thread = std::thread::spawn(move || {
                 let runtime = create_runtime();
@@ -153,7 +150,7 @@ fn main() {
             upload_thread.join().unwrap();
         }
         Command::Collect(args) => {
-            let repository = FileBackend::new(args.repository);
+            let repository = create_repository(args.repository);
             let runtime = create_runtime();
             let collection = runtime.block_on(collect_fossils(
                 &repository,
@@ -164,11 +161,11 @@ fn main() {
         }
         Command::Delete(args) => {
             let collection = load_collection(&args.collection);
-            let repository = FileBackend::new(args.repository);
+            let repository = create_repository(args.repository);
             let runtime = create_runtime();
             if args.collect.is_empty() {
                 runtime
-                    .block_on(collection.delete::<_, ID>(&repository, args.parallelism.into()))
+                    .block_on(collection.delete(&repository, args.parallelism.into()))
                     .unwrap();
                 std::fs::remove_file(args.collection).unwrap();
             } else {
@@ -182,7 +179,7 @@ fn main() {
             }
         }
         Command::AddClient(args) => {
-            let repository = FileBackend::new(args.repository);
+            let repository = create_repository(args.repository);
             let runtime = create_runtime();
             runtime.block_on(async {
                 let id = ID::new(args.client);
@@ -191,7 +188,7 @@ fn main() {
             })
         }
         Command::RemoveClient(args) => {
-            let repository = FileBackend::new(args.repository);
+            let repository = create_repository(args.repository);
             let runtime = create_runtime();
             runtime
                 .block_on(repository.remove_client(&ID::new(args.client)))
@@ -204,16 +201,18 @@ fn create_runtime() -> tokio::runtime::Runtime {
     Builder::new_current_thread().build().unwrap()
 }
 
+fn create_repository(path: PathBuf) -> FileRepository<ID, ID, ChunkID> {
+    FileRepository::new(path)
+}
+
 #[allow(clippy::await_holding_refcell_ref)]
-async fn create_manifest<R>(
-    repository: &R,
+async fn create_manifest(
+    repository: &FileRepository<ID, ID, ChunkID>,
     parallelism: usize,
     name: &ID,
     client: &ID,
     receiver: Receiver<Option<(ChunkID, Vec<u8>)>>,
-) where
-    R: Repository<ID, ID, ChunkID>,
-{
+) {
     let mut builder = pin!(repository.create_manifest(name, client).await.unwrap());
     let completed = Cell::new(false);
     let builder_cell = RefCell::new(builder.as_mut());
@@ -257,31 +256,27 @@ fn store_collection(collection: &FossilCollection<ID, ChunkID>, path: &Path) {
     ciborium::into_writer(collection, std::io::BufWriter::new(file)).unwrap();
 }
 
-async fn download_manifest_chunks<R, F>(
-    repository: &R,
+async fn download_manifest_chunks<F>(
+    repository: &FileRepository<ID, ID, ChunkID>,
     id: &ID,
     mut on_chunk: F,
-) -> (ID, <R::Manifest as Manifest<ID, ChunkID>>::ReferencedChunks)
+) -> <FileRepository<ID, ID, ChunkID> as Repository>::Manifest
 where
-    R: Repository<ID, ID, ChunkID>,
-    <R::Manifest as Manifest<ID, ChunkID>>::ReferencedChunks: Unpin,
     F: FnMut(ChunkID),
 {
-    let (creator, mut referenced_chunks) = repository
-        .manifest(id)
-        .await
-        .unwrap()
-        .into_referenced_chunks();
-    let mut pinned_chunks = Pin::new(&mut referenced_chunks);
-    while let Some(chunk) = pinned_chunks.try_next().await.unwrap() {
+    let mut manifest = repository.manifest(id).await.unwrap();
+    let mut pinned_manifest = Pin::new(&mut manifest);
+    while let Some(chunk) = pinned_manifest.try_next().await.unwrap() {
         on_chunk(chunk);
     }
-    (creator, referenced_chunks)
+    manifest
 }
 
-async fn remove_manifests<'a, R, I>(repository: &R, parallelism: usize, manifests: I)
-where
-    R: Repository<ID, ID, ChunkID>,
+async fn remove_manifests<'a, I>(
+    repository: &FileRepository<ID, ID, ChunkID>,
+    parallelism: usize,
+    manifests: I,
+) where
     I: IntoIterator<Item = &'a ID>,
 {
     let stream = pin!(iter(manifests.into_iter().map(Ok)));
@@ -291,17 +286,13 @@ where
         .unwrap();
 }
 
-async fn collect_fossils<R, M>(
-    repository: &R,
+async fn collect_fossils<M>(
+    repository: &FileRepository<ID, ID, ChunkID>,
     parallelism: usize,
     manifests: M,
 ) -> FossilCollection<ID, ChunkID>
 where
-    R: Repository<ID, ID, ChunkID>,
     M: IntoIterator<Item = ID>,
-    <R as Repository<ID, ID, ChunkID>>::Error: 'static,
-    <R::Manifest as Manifest<ID, ChunkID>>::ReferencedChunks: Unpin,
-    <R::Manifest as Manifest<ID, ChunkID>>::Error: 'static,
 {
     let pruned_manifests: std::collections::HashSet<ID> = manifests.into_iter().collect();
     let mut builder = FossilCollectionBuilder::new();
@@ -337,16 +328,14 @@ where
     collection
 }
 
-async fn pipelined_delete<R, M>(
-    repository: &R,
+async fn pipelined_delete<M>(
+    repository: &FileRepository<ID, ID, ChunkID>,
     parallelism: usize,
     collection: FossilCollection<ID, ChunkID>,
     manifests: M,
 ) -> FossilCollection<ID, ChunkID>
 where
-    R: Repository<ID, ID, ChunkID>,
     M: IntoIterator<Item = ID>,
-    <R::Manifest as Manifest<ID, ChunkID>>::ReferencedChunks: Unpin,
 {
     let pruned_manifests: std::collections::HashSet<ID> = manifests.into_iter().collect();
     let mut builder = collection.pipelined_delete();
@@ -355,12 +344,11 @@ where
     current_manifests
         .try_for_each_concurrent(parallelism, |id| async {
             if !pruned_manifests.contains(&id) {
-                let (creator, referenced_chunks) =
-                    download_manifest_chunks(repository, &id, |chunk| {
-                        cell.borrow_mut().add_referenced_chunk(chunk)
-                    })
-                    .await;
-                let timestamp = referenced_chunks.into_timestamp().await.unwrap();
+                let manifest = download_manifest_chunks(repository, &id, |chunk| {
+                    cell.borrow_mut().add_referenced_chunk(chunk)
+                })
+                .await;
+                let (creator, timestamp) = manifest.into_metadata().await.unwrap();
                 cell.borrow_mut().add_seen_manifest(id, creator, timestamp);
             }
             Ok(())
@@ -370,11 +358,11 @@ where
     let pruned_stream = pin!(iter(pruned_manifests.iter()));
     pruned_stream
         .for_each_concurrent(parallelism, |id| async {
-            let (creator, referenced_chunks) = download_manifest_chunks(repository, id, |chunk| {
+            let manifest = download_manifest_chunks(repository, id, |chunk| {
                 cell.borrow_mut().add_fossil_candidate(chunk)
             })
             .await;
-            let timestamp = referenced_chunks.into_timestamp().await.unwrap();
+            let (creator, timestamp) = manifest.into_metadata().await.unwrap();
             cell.borrow_mut()
                 .add_expiring_manifest(id.clone(), creator, timestamp);
         })

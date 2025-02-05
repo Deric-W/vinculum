@@ -1,19 +1,24 @@
 //! Tests for fossil collection.
 
-use super::{create_chunks, create_manifest, create_repository};
-use crate::{assert_chunks, assert_eq_unordered, assert_fossils, ID};
+mod utilities;
+
 use std::iter::Iterator;
 use std::time::SystemTime;
 use tempfile::tempdir;
-use vinculum::{ChunkBackend, FossilCollection, FossilCollectionBuilder};
+use utilities::{
+    assert_chunks, assert_eq_unordered, assert_fossils, create_chunks, create_manifest,
+    create_repository,
+};
+use vinculum::{FossilCollection, FossilCollectionBuilder, Repository};
+use vinculum_benchmark::{ChunkID, ID};
 
 #[tokio::test]
 async fn create_fossils() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let chunks: Vec<ID> = (0..10).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
     create_chunks(&repository, chunks.as_slice()).await;
-    let manifest = ID { inner: [42; 32] };
+    let manifest = ID::new("manifest_0".to_string());
     create_manifest(&repository, &manifest, &manifest, &chunks[..5]).await;
     let mut builder = FossilCollectionBuilder::new();
     for chunk in &chunks[5..] {
@@ -42,9 +47,9 @@ async fn create_fossils() {
 async fn remove_fossil_candidates() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let chunks: Vec<ID> = (0..10).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
     create_chunks(&repository, chunks.as_slice()).await;
-    let manifest = ID { inner: [42; 32] };
+    let manifest = ID::new("manifest_0".to_string());
     create_manifest(&repository, &manifest, &manifest, &chunks[..5]).await;
     let mut builder = FossilCollectionBuilder::new();
     builder.add_referenced_chunk(chunks[7].clone());
@@ -87,12 +92,12 @@ async fn remove_fossil_candidates() {
 async fn collect_all_fossils() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let chunks: Vec<ID> = (0..11).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..11).map(|i| ChunkID::new([i; 32])).collect();
     create_chunks(&repository, chunks.as_slice()).await;
-    repository.make_fossil(&chunks[10]).await.unwrap();
-    repository.make_fossil(&chunks[8]).await.unwrap();
+    repository.fossilize_chunk(&chunks[10]).await.unwrap();
+    repository.fossilize_chunk(&chunks[8]).await.unwrap();
     create_chunks(&repository, &chunks[8..9]).await;
-    let manifest = ID { inner: [42; 32] };
+    let manifest = ID::new("manifest_0".to_string());
     create_manifest(&repository, &manifest, &manifest, &chunks[..5]).await;
     let mut builder = FossilCollectionBuilder::new();
     for chunk in &chunks[5..10] {
@@ -114,8 +119,8 @@ async fn collect_all_fossils() {
 
 #[test]
 fn merge_collections() {
-    let fossils: Vec<ID> = (0..10).map(|i| ID { inner: [i; 32] }).collect();
-    let manifests: Vec<ID> = (10..20).map(|i| ID { inner: [i; 32] }).collect();
+    let fossils: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
+    let manifests: Vec<ChunkID> = (10..20).map(|i| ChunkID::new([i; 32])).collect();
     let timestamp1 = SystemTime::now();
     let timestamp2 = timestamp1 + std::time::Duration::new(1, 0);
     let mut collection1 = FossilCollection::from_parts(

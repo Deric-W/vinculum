@@ -1,14 +1,14 @@
 //! Tests for repository initialization
 
+use crate::repository::initialize;
 use tempfile::tempdir;
-use vinculum::backends::files;
 
 // Initialisation tests
 #[test]
 fn initializes_directories() {
     let tmpdir = tempdir().unwrap();
     let repo_path = tmpdir.path().join("repository");
-    files::initialize(&repo_path).unwrap();
+    initialize(&repo_path).unwrap();
     for directory in ["chunks", "clients", "fossils", "manifests", "incoming"] {
         assert!(repo_path.join(directory).is_dir());
     }
@@ -25,5 +25,5 @@ fn skips_existing_directories() {
             .unwrap();
     }
 
-    assert!(matches!(files::initialize(repo_path), Ok(())));
+    assert!(matches!(initialize(repo_path), Ok(())));
 }

@@ -8,9 +8,8 @@
 //!
 //! The most important object is the repository, which stores chunks, clients
 //! and manifests and is available to a number of clients.
-//! It is represented by the [`Repository`] trait, which has implementations
-//! defined in the [`backends`] module.
-//!
+//! It is represented by the [`Repository`] trait, which is designed to be
+//! implemented by you.
 //! Clients represent individual users which may perform operations on the
 //! repository at the same time as other clients, like creating chunks or
 //! manifests.
@@ -47,17 +46,11 @@
 //!
 //! ## Features
 //!
-//! - `files`: enables a repository implementation utilizing the local file system.
 //! - `serde`: implements [`serde::Serialize`] and [`serde::Deserialize`] for [`FossilCollection`].
 
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-pub mod backends;
-pub mod utils;
-
 use futures::future::FutureExt;
-use futures::io::{AsyncRead, AsyncWrite};
-use futures::sink::Sink;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -69,104 +62,106 @@ use std::pin::{pin, Pin};
 use std::time::SystemTime;
 use thiserror::Error;
 
-/// The client backend, with the type of client Id as a generic parameter (for example a UUID).
-///
-/// Clients represent actors which can access a repository independently.
-pub trait ClientBackend<I> {
+/// A repository storing clients, chunks and manifests.
+pub trait Repository {
+    /// Id used to identify manifests.
+    ///
+    /// When a manifest with an id has been created recreating it with the
+    /// same id but different content is not allowed.
+    type ManifestID;
+
+    type Manifest: Manifest;
+
     /// The Type of errors produced by this implementation.
     type Error: std::error::Error;
+
+    /// Enumerate all manifests existing within the repository.
+    ///
+    /// Changes by creating or removing manifests during enumeration may or may
+    /// not be picked up.
+    fn manifests(
+        &self,
+    ) -> impl Future<
+        Output = Result<impl Stream<Item = Result<Self::ManifestID, Self::Error>>, Self::Error>,
+    >;
 
     /// Enumerate all clients currently registered with the repository.
     ///
     /// Changes by adding or removing clients during enumeration may or may not
     /// be picked up.
+    #[allow(clippy::type_complexity)]
     fn clients(
         &self,
-    ) -> impl Future<Output = Result<impl Stream<Item = Result<I, Self::Error>>, Self::Error>>;
+    ) -> impl Future<
+        Output = Result<
+            impl Stream<Item = Result<<Self::Manifest as Manifest>::ClientID, Self::Error>>,
+            Self::Error,
+        >,
+    >;
 
-    /// Request data associated with a client.
-    ///
-    /// Each client can have associated data stored in the repository.
-    fn client(&self, id: &I) -> impl Future<Output = Result<impl AsyncRead, Self::Error>>;
-
-    /// Register a client with the repository.
-    ///
-    /// The client will be registered when the async write is closed.
-    ///
-    /// A client has to be registered with the repository before
-    /// he can perform any operations on it.
-    /// Should the client already be registered with the repository
-    /// its associated data will be overwritten.
-    fn add_client(&self, id: &I) -> impl Future<Output = Result<impl AsyncWrite, Self::Error>>;
-
-    /// Remove a client from the repository.
-    ///
-    /// Clients have to finish all pending operations before being removed from the repository.
-    fn remove_client(&self, id: &I) -> impl Future<Output = Result<(), Self::Error>>;
-}
-
-/// The chunk backend with the type of chunk Id as a generic parameter.
-///
-/// Chunks represent pieces of data uploaded by clients and may be referenced by multiple manifest files.
-/// This can for example be a hash of its contents.
-/// It is important that chunks with the same content receive the same Id since it allows
-/// duplicate data to be shared between multiple manifest files.
-pub trait ChunkBackend<C> {
-    /// The Type of errors produced by this implementation.
-    type Error: std::error::Error;
+    /// Request a manifest.
+    fn manifest(
+        &self,
+        id: &Self::ManifestID,
+    ) -> impl Future<Output = Result<Self::Manifest, <Self::Manifest as Manifest>::Error>>;
 
     /// Enumerate all chunks existing within the repository.
     ///
     /// Changes by adding or removing chunks during enumeration may or may not
     /// be picked up.
+    #[allow(clippy::type_complexity)]
     fn chunks(
         &self,
-    ) -> impl Future<Output = Result<impl Stream<Item = Result<C, Self::Error>>, Self::Error>>;
-
-    /// Request the contents of a chunk.
-    ///
-    /// Its fossil can be used in case the original chunk does not exist.
-    fn chunk(&self, id: &C) -> impl Future<Output = Result<impl AsyncRead, Self::Error>>;
-
-    /// Check whether a chunk exists in the repository.
-    ///
-    /// The result of this query may be used to skip uploading chunks which
-    /// already exist in the repository and may not consider fossils.
-    fn has_chunk(&self, id: &C) -> impl Future<Output = Result<bool, Self::Error>>;
-
-    /// Store a chunk in the repository.
-    ///
-    /// The chunk will be added when the async write is closed.
-    ///
-    /// Should a chunk already exist within a repository its contents
-    /// will be overwritten.
-    fn add_chunk(&self, id: &C) -> impl Future<Output = Result<impl AsyncWrite, Self::Error>>;
+    ) -> impl Future<
+        Output = Result<
+            impl Stream<Item = Result<<Self::Manifest as Manifest>::ChunkID, Self::Error>>,
+            Self::Error,
+        >,
+    >;
 
     /// Enumerate all fossils existing within the repository.
     ///
-    /// Changes by fossilizing chunks or recovering or deletion fossils during
+    /// Changes by fossilizing chunks or recovering or deleting fossils during
     /// enumeration may or may not be picked up.
+    #[allow(clippy::type_complexity)]
     fn fossils(
         &self,
-    ) -> impl Future<Output = Result<impl Stream<Item = Result<C, Self::Error>>, Self::Error>>;
+    ) -> impl Future<
+        Output = Result<
+            impl Stream<Item = Result<<Self::Manifest as Manifest>::ChunkID, Self::Error>>,
+            Self::Error,
+        >,
+    >;
 
     /// Turn a chunk into a fossil.
     ///
     /// Since a fossil may be referenced by new manifest files after creation
-    /// it is allowed to be used in place of its original chunk, but not during
+    /// it is allowed to be used if the original chunk is missing, but not during
     /// manifest creation.
+    /// Should both a referenced chunk and its fossil appear to be missing there
+    /// is a possibility that the chunk was turned into a fossil and recovered
+    /// just before the respective object could be accessed.
+    /// In this case retrying the access operations a second time will succeed,
+    /// assuming the client did not create a new manifest in the meantime.
+    ///
     /// During manifest creation chunks having the same ID as the original chunk of
-    /// the fossil must be created again.
+    /// the fossil must be created again, even when the fossil still exists.
     ///
     /// When the chunk does not exists this method should not return an error
-    /// but instead treat the fossil as having been created and return its ID.
-    fn make_fossil(&self, id: &C) -> impl Future<Output = Result<(), Self::Error>>;
+    /// but instead treat the fossil as having been created.
+    fn fossilize_chunk(
+        &self,
+        chunk: &<Self::Manifest as Manifest>::ChunkID,
+    ) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Turn a fossil back into a chunk.
     ///
     /// When the fossil does not exist this method should not return an error
     /// but instead treat the chunk as having been restored.
-    fn recover_fossil(&self, id: &C) -> impl Future<Output = Result<(), Self::Error>>;
+    fn recover_fossil(
+        &self,
+        fossil: &<Self::Manifest as Manifest>::ChunkID,
+    ) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Delete a fossil permanently.
     ///
@@ -176,187 +171,50 @@ pub trait ChunkBackend<C> {
     ///
     /// When the fossil does not exists this method should not return an error
     /// but instead treat the fossil as having been deleted successfully.
-    fn delete_fossil(&self, id: &C) -> impl Future<Output = Result<(), Self::Error>>;
+    fn delete_fossil(
+        &self,
+        fossil: &<Self::Manifest as Manifest>::ChunkID,
+    ) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
-/// Data uploaded by a client, represented as a sequence of chunks and additional data.
+/// Data uploaded by a client, represented as a set of chunks and metadata.
 ///
-/// The generic parameters represent the type of client and chunk ids.
+/// The set of chunks produced by a manifest represents all chunks referenced
+/// by it and may include chunks which were not present when creating the manifest,
+/// for example when the actual list of chunks is itself stored in chunks.
 ///
-/// The process of reading a manifest begins by calling either [`Manifest::into_chunks`]
-/// or [`Manifest::into_referenced_chunks`], depending whether the original data
-/// or dependency information should be retrieved.
-///
-/// Should [`Manifest::into_chunks`] be called the additional data stored with
-/// the manifest can be accessed by calling [`ManifestChunks::into_data`], which
-/// will skip any remaining chunks.
-///
-/// The returned values of [`ManifestChunks::into_data`] and [`Manifest::into_referenced_chunks`]
-/// both support the extraction of a timestamp recorded after all manifest chunks where uploaded
-/// and all additional data was written, which can be done using the [`ManifestTimestamp::into_timestamp`]
-/// function which will skip any remaining additional data or referenced chunks.
-///
-/// The reason for this sequence of operations is to allow implementations the
-/// possibility to stream the manifest which prevents it from needing to be buffered in memory.
-pub trait Manifest<I, C> {
+/// The Metadata includes the client which created this manifest and a timestamp.
+/// The timestamp is recorded after all chunks where uploaded and and additional
+/// data was written, but may be before the manifest upload finished.
+pub trait Manifest: Stream<Item = Result<Self::ChunkID, Self::Error>> + Unpin {
+    /// Id used to identify chunks.
+    ///
+    /// It is imporant that chunks receiving the same id have the same content.
+    type ChunkID;
+
+    /// Id used to identify clients.
+    ///
+    /// Clients represent actors which can access a repository independently.
+    type ClientID;
+
     /// The Type of errors produced by this implementation.
     type Error: std::error::Error;
 
-    /// The Type representing the chunks and additional data uploaded by the user.
-    type Chunks: ManifestChunks<C, Self::Error>;
-
-    /// The Type representing the actual chunks referenced by the manifest.
-    ///
-    /// This can be different from [`Manifest::Chunks`] if for example the actual
-    /// content of the manifest is itself stored in chunks.
-    type ReferencedChunks: Stream<Item = Result<C, Self::Error>> + ManifestTimestamp<Self::Error>;
-
-    /// Client which created this manifest.
-    fn creator(&self) -> &I;
-
-    /// Read this manifest as the chunks and additional data uploaded by the user.
-    ///
-    /// This also transfers ownership of the creator id.
-    fn into_chunks(self) -> (I, Self::Chunks);
-
-    /// Read this manifest as the actual chunks referenced by it.
-    ///
-    /// This also transfers ownership of the creator id.
-    fn into_referenced_chunks(self) -> (I, Self::ReferencedChunks);
-}
-
-/// Sequence of chunks uploaded by a client.
-///
-/// The generic parameters represent the chunk ids and error type.
-pub trait ManifestChunks<C, E>: Stream<Item = Result<C, E>> {
-    /// The Type representing the additional manifest data.
-    type Data: AsyncRead + ManifestTimestamp<E>;
-
-    /// Continue with reading the additional manifest data uploaded by the client.
-    fn into_data(self) -> impl Future<Output = Result<Self::Data, E>>;
-}
-
-/// Final state of the manifest decoding process, producing the timestamp.
-///
-/// The generic parameter represents the error type.
-pub trait ManifestTimestamp<E> {
-    /// Convert this manifest data into its timestamp.
-    ///
-    /// The timestamp is recorded after all chunks where uploaded and and additional
-    /// data was written, but may be before the manifest upload finished.
-    fn into_timestamp(self) -> impl Future<Output = Result<SystemTime, E>>;
-}
-
-/// Trait representing a manifest creation process with the type of chunk Id as a generic parameter.
-///
-/// It receives chunks which will be added to the repository by the user before
-/// the manifest will be created, either by uploading them or making sure they
-/// already exist.
-///
-/// A backend can not depend on the list of chunks being complete.
-/// Middlewares can encode additional chunks in the additional data or
-/// store the list as chunks themselves.
-///
-/// The manifest will be created when the builder or the [`AsyncWrite`] instance
-/// returned by [`ManifestBuilder<I>.add_data`] is closed, trying to add additional
-/// data after closing will result in errors.
-pub trait ManifestBuilder<C>:
-    for<'a> Sink<&'a C, Error = <Self as ManifestBuilder<C>>::Error>
-{
-    /// The Type of errors produced by this implementation.
-    type Error: std::error::Error;
-
-    /// The Type representing additional manifest data.
-    type Data: AsyncWrite;
-
-    /// Add additional data to the manifest.
-    ///
-    /// Manifests can store custom data in addition to the sequence of its
-    /// chunks, which allows clients to store (for example) additional metadata.
-    ///
-    /// When the returned async write is closed a timestamp will be recorded
-    /// and the manifest created, replacing any existing manifest.
-    fn add_data(
+    /// Extract the client which created this manifest with the associated timestamp.
+    fn into_metadata(
         self,
-    ) -> impl Future<Output = Result<Self::Data, <Self as ManifestBuilder<C>>::Error>>;
-}
-
-/// A repository storing clients, chunks and manifests.
-///
-/// The generic parameters represent the type of manifest, client, chunk and fossil Ids.
-pub trait Repository<M, I, C>: ClientBackend<I> + ChunkBackend<C> {
-    /// The Type of errors produced by this implementation.
-    type Error: std::error::Error;
-
-    /// Type of manifest stored in this repository.
-    ///
-    /// See [`Repository::manifest`].
-    type Manifest: Manifest<I, C>;
-
-    /// Type representing a manifest being created.
-    ///
-    /// See [`Repository::create_manifest`].
-    type Builder: ManifestBuilder<C>;
-
-    /// Enumerate all manifests existing within the repository.
-    ///
-    /// Changes by creating or removing manifests during enumeration may or may
-    /// not be picked up.
-    #[allow(clippy::type_complexity)]
-    fn manifests(
-        &self,
-    ) -> impl Future<
-        Output = Result<
-            impl Stream<Item = Result<M, <Self as Repository<M, I, C>>::Error>>,
-            <Self as Repository<M, I, C>>::Error,
-        >,
-    >;
-
-    /// Request a manifest.
-    fn manifest(
-        &self,
-        id: &M,
-    ) -> impl Future<Output = Result<Self::Manifest, <Self::Manifest as Manifest<I, C>>::Error>>;
-
-    /// Create a manifest.
-    ///
-    /// When a manifest with an id has been created recreating it with the
-    /// same id but different content is not allowed.
-    ///
-    /// Furthermore, a client creating a manifest while the same client is downloading a
-    /// chunk can cause the download to fail by making it appear as if the
-    /// chunk does not exist.
-    fn create_manifest(
-        &self,
-        id: &M,
-        client: &I,
-    ) -> impl Future<Output = Result<Self::Builder, <Self::Builder as ManifestBuilder<C>>::Error>>;
-
-    /// Remove a manifest.
-    ///
-    /// Removing a manifest may leave unreferenced chunks behind, which is why
-    /// this operation should be performed by a fossil collection step.
-    fn remove_manifest(
-        &self,
-        id: &M,
-    ) -> impl Future<Output = Result<(), <Self as Repository<M, I, C>>::Error>>;
+    ) -> impl Future<Output = Result<(Self::ClientID, SystemTime), Self::Error>>;
 }
 
 /// Error of a failed fossil deletion operation.
 #[derive(Error, Debug)]
-pub enum FossilDeletionError<R, M, I, C> {
+pub enum FossilDeletionError<R, M> {
     /// A repository operation failed.
     #[error("repository operation failed with {0}")]
     RepositoryError(#[source] R),
     /// A manifest reading operation failed
-    #[error("manifest operation failed with {0}")]
+    #[error("manifest reading operation failed with {0}")]
     ManifestError(#[source] M),
-    /// A client operation failed.
-    #[error("client operation failed with {0}")]
-    ClientError(#[source] I),
-    /// A fossil operation failed
-    #[error("fossil operation failed with {0}")]
-    FossilError(#[source] C),
     /// Some clients have not created a new manifest since the associated fossil collection finished.
     #[error("Some clients have not created a new manifest since the associated fossil collection finished")]
     TooEarly,
@@ -504,25 +362,17 @@ impl<M, C> FossilCollection<M, C> {
     ///
     /// Based on whether a fossil is referenced by these manifests or not
     /// it will either be deleted or recovered back into a chunk.
-    pub async fn delete<R, I>(
+    pub async fn delete<R>(
         &self,
         repository: &R,
         parallelism: usize,
-    ) -> Result<
-        (),
-        FossilDeletionError<
-            <R as Repository<M, I, C>>::Error,
-            <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error,
-            <R as ClientBackend<I>>::Error,
-            <R as ChunkBackend<C>>::Error,
-        >,
-    >
+    ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
-        R: Repository<M, I, C>,
-        <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin,
-        M: Hash + Eq,
-        I: Hash + Eq,
-        C: Hash + Eq,
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ChunkID = C>,
+        R::ManifestID: Hash + Eq,
+        <R::Manifest as Manifest>::ClientID: Hash + Eq,
+        <R::Manifest as Manifest>::ChunkID: Hash + Eq,
     {
         let mut deleter = SimpleFossilDeleter::new(self);
         deleter
@@ -641,7 +491,8 @@ impl<M, C> FossilCollectionBuilder<M, C> {
         parallelism: usize,
     ) -> Result<FossilCollection<M, C>, FossilCollectionError<M, C, R::Error>>
     where
-        R: ChunkBackend<C>,
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ChunkID = C>,
     {
         if let Err(e) = self.apply_fossil_operations(repository, parallelism).await {
             return Err(FossilCollectionError::new(self, e));
@@ -662,10 +513,11 @@ impl<M, C> FossilCollectionBuilder<M, C> {
         parallelism: usize,
     ) -> Result<(), R::Error>
     where
-        R: ChunkBackend<C>,
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ChunkID = C>,
     {
         let mut fossil_stream = futures::stream::iter(self.iter_fossil_candidates())
-            .map(|id| Ok(repository.make_fossil(id)))
+            .map(|id| Ok(repository.fossilize_chunk(id)))
             .try_buffer_unordered(parallelism);
 
         while let Some(res) = fossil_stream.next().await {
@@ -732,7 +584,8 @@ where
         parallelism: usize,
     ) -> Result<FossilCollection<M, C>, FossilCollectionError<M, C, R::Error>>
     where
-        R: ChunkBackend<C>,
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ChunkID = C>,
     {
         let mut fossil_stream = match repository.fossils().await {
             Ok(stream) => pin!(stream),
@@ -830,18 +683,10 @@ where
         &mut self,
         repository: &R,
         parallelism: usize,
-    ) -> Result<
-        (),
-        FossilDeletionError<
-            <R as Repository<M, I, C>>::Error,
-            <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error,
-            <R as ClientBackend<I>>::Error,
-            <R as ChunkBackend<C>>::Error,
-        >,
-    >
+    ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
-        R: Repository<M, I, C>,
-        <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin,
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         <Self as FossilDeleter<M, I, C>>::delete(self, repository, parallelism).await
     }
@@ -1080,17 +925,12 @@ where
             M,
             I,
             C,
-            FossilDeletionError<
-                <R as Repository<M, I, C>>::Error,
-                <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error,
-                <R as ClientBackend<I>>::Error,
-                <R as ChunkBackend<C>>::Error,
-            >,
+            FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>,
         >,
     >
     where
-        R: Repository<M, I, C>,
-        <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin,
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         // do not include manifests of fossil collection or expiring manifests
         // in builder since they might reference the fossil candidates
@@ -1119,18 +959,10 @@ trait FossilDeleter<M, I, C> {
         &mut self,
         repository: &R,
         parallelism: usize,
-    ) -> Result<
-        (),
-        FossilDeletionError<
-            <R as Repository<M, I, C>>::Error,
-            <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error,
-            <R as ClientBackend<I>>::Error,
-            <R as ChunkBackend<C>>::Error,
-        >,
-    >
+    ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
-        R: Repository<M, I, C>,
-        <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin,
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         let cell = RefCell::new(&mut *self);
         let mut manifest_stream = pin!(repository
@@ -1150,29 +982,21 @@ trait FossilDeleter<M, I, C> {
         &mut self,
         repository: &R,
         parallelism: usize,
-    ) -> Result<
-        (),
-        FossilDeletionError<
-            <R as Repository<M, I, C>>::Error,
-            <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error,
-            <R as ClientBackend<I>>::Error,
-            <R as ChunkBackend<C>>::Error,
-        >,
-    >
+    ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
-        R: Repository<M, I, C>,
-        <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin,
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         // check Policy 3
         let mut client_stream = pin!(repository
             .clients()
             .await
-            .map_err(FossilDeletionError::ClientError)?);
+            .map_err(FossilDeletionError::RepositoryError)?);
         while let Some(res) = client_stream.next().await {
             match res {
                 Ok(client) if self.has_valid_client(&client) => (),
                 Ok(_) => return Err(FossilDeletionError::TooEarly),
-                Err(e) => return Err(FossilDeletionError::ClientError(e)),
+                Err(e) => return Err(FossilDeletionError::RepositoryError(e)),
             }
         }
 
@@ -1190,46 +1014,40 @@ trait FossilDeleter<M, I, C> {
             })
             .try_buffer_unordered(parallelism);
         while let Some(res) = fossil_stream.next().await {
-            res.map_err(FossilDeletionError::FossilError)?;
+            res.map_err(FossilDeletionError::RepositoryError)?;
         }
 
         Ok(())
     }
 }
 
-async fn check_manifest<R, M, I, C, D>(
+async fn check_manifest<R, D>(
     repository: &R,
-    id: M,
+    id: R::ManifestID,
     deleter: &RefCell<&mut D>,
-) -> Result<
-    (),
-    FossilDeletionError<
-        <R as Repository<M, I, C>>::Error,
-        <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::Error,
-        <R as ClientBackend<I>>::Error,
-        <R as ChunkBackend<C>>::Error,
-    >,
->
+) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
 where
-    R: Repository<M, I, C>,
-    D: FossilDeleter<M, I, C> + ?Sized,
-    <<R as Repository<M, I, C>>::Manifest as Manifest<I, C>>::ReferencedChunks: Unpin,
+    R: Repository,
+    D: FossilDeleter<
+            R::ManifestID,
+            <R::Manifest as Manifest>::ClientID,
+            <R::Manifest as Manifest>::ChunkID,
+        > + ?Sized,
 {
     if deleter.borrow().has_seen_manifest(&id) {
         return Ok(());
     }
-    let (creator, mut referenced_chunks) = repository
+    let mut manifest = repository
         .manifest(&id)
         .await
-        .map_err(FossilDeletionError::ManifestError)?
-        .into_referenced_chunks();
-    let mut pinned_chunks = Pin::new(&mut referenced_chunks);
+        .map_err(FossilDeletionError::ManifestError)?;
+    let mut pinned_chunks = Pin::new(&mut manifest);
     while let Some(res) = pinned_chunks.as_mut().next().await {
         let chunk = res.map_err(FossilDeletionError::ManifestError)?;
         deleter.borrow_mut().add_referenced_chunk(chunk);
     }
-    let timestamp = referenced_chunks
-        .into_timestamp()
+    let (creator, timestamp) = manifest
+        .into_metadata()
         .await
         .map_err(FossilDeletionError::ManifestError)?;
     deleter

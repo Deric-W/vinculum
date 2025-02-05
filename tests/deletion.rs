@@ -1,36 +1,36 @@
 //! Tests for fossil deletion.
 
-use super::{create_chunks, create_manifest, create_repository};
-use crate::{assert_chunks, assert_eq_unordered, assert_fossils, ID};
+mod utilities;
+
 use futures::io::AsyncWriteExt;
 use std::iter::Iterator;
 use std::pin::pin;
 use std::time::SystemTime;
 use tempfile::tempdir;
-use vinculum::{
-    backends::files::FileBackend, ClientBackend, FossilCollection, FossilCollectionBuilder,
-    FossilDeletionError, Repository,
+use utilities::{
+    assert_chunks, assert_eq_unordered, assert_fossils, create_chunks, create_manifest,
+    create_repository,
 };
+use vinculum::{FossilCollection, FossilCollectionBuilder, FossilDeletionError};
+use vinculum_benchmark::{ChunkID, ID};
 
 #[tokio::test]
 async fn delete_collection() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let chunks: Vec<ID> = (0..10).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
     create_chunks(&repository, chunks.as_slice()).await;
-    let manifest1 = ID { inner: [42; 32] };
+    let manifest1 = ID::new("manifest_0".to_string());
     create_manifest(&repository, &manifest1, &manifest1, &chunks[..5]).await;
-    let manifest2 = ID { inner: [43; 32] };
+    let manifest2 = ID::new("manifest_1".to_string());
     create_manifest(&repository, &manifest2, &manifest2, &chunks[2..]).await;
-    let mut builder = FossilCollectionBuilder::<ID, ID>::new();
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
     for chunk in chunks[..5].iter() {
         builder.add_fossil_candidate(chunk.clone());
     }
     let collection = builder.collect_fossils(&repository, 1).await.unwrap();
-    <FileBackend as Repository<ID, ID, ID>>::remove_manifest(&repository, &manifest1)
-        .await
-        .unwrap();
-    collection.delete::<_, ID>(&repository, 1).await.unwrap();
+    repository.remove_manifest(&manifest1).await.unwrap();
+    collection.delete(&repository, 1).await.unwrap();
 
     assert_chunks(&repository, chunks[2..].iter().cloned()).await;
     assert_fossils(&repository, chunks[..0].iter().cloned()).await;
@@ -40,22 +40,20 @@ async fn delete_collection() {
 async fn delete_with_seen_manifests() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let chunks: Vec<ID> = (0..10).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
     create_chunks(&repository, chunks.as_slice()).await;
-    let manifest1 = ID { inner: [42; 32] };
+    let manifest1 = ID::new("manifest_0".to_string());
     create_manifest(&repository, &manifest1, &manifest1, &chunks[..5]).await;
-    let manifest2 = ID { inner: [43; 32] };
+    let manifest2 = ID::new("manifest_1".to_string());
     create_manifest(&repository, &manifest2, &manifest2, &chunks[5..]).await;
-    let mut builder = FossilCollectionBuilder::<ID, ID>::new();
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
     for chunk in chunks[..5].iter() {
         builder.add_fossil_candidate(chunk.clone());
     }
     builder.add_seen_manifest(manifest2.clone());
     let collection = builder.collect_fossils(&repository, 1).await.unwrap();
-    <FileBackend as Repository<ID, ID, ID>>::remove_manifest(&repository, &manifest1)
-        .await
-        .unwrap();
-    collection.delete::<_, ID>(&repository, 1).await.unwrap();
+    repository.remove_manifest(&manifest1).await.unwrap();
+    collection.delete(&repository, 1).await.unwrap();
 
     assert_chunks(&repository, chunks[5..].iter().cloned()).await;
     assert_fossils(&repository, chunks[..0].iter().cloned()).await;
@@ -65,71 +63,66 @@ async fn delete_with_seen_manifests() {
 async fn delete_collection_too_early() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let client1 = ID { inner: [24; 32] };
+    let client1 = ID::new("client_0".to_string());
     pin!(repository.add_client(&client1).await.unwrap())
         .close()
         .await
         .unwrap();
-    let client2 = ID { inner: [25; 32] };
+    let client2 = ID::new("client_1".to_string());
     pin!(repository.add_client(&client2).await.unwrap())
         .close()
         .await
         .unwrap();
-    let chunks: Vec<ID> = (0..10).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
     create_chunks(&repository, chunks.as_slice()).await;
-    let manifest1 = ID { inner: [42; 32] };
+    let manifest1 = ID::new("manifest_0".to_string());
     create_manifest(&repository, &manifest1, &client1, chunks.as_slice()).await;
-    let mut builder = FossilCollectionBuilder::<ID, ID>::new();
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
     for chunk in chunks[..5].iter() {
         builder.add_fossil_candidate(chunk.clone());
     }
     let collection = builder.collect_fossils(&repository, 1).await.unwrap();
 
     assert!(matches!(
-        collection.delete::<_, ID>(&repository, 1).await,
+        collection.delete(&repository, 1).await,
         Err(FossilDeletionError::TooEarly)
     ));
 
-    let manifest2 = ID { inner: [43; 32] };
+    let manifest2 = ID::new("manifest_1".to_string());
     create_manifest(&repository, &manifest2, &client1, chunks.as_slice()).await;
 
     assert!(matches!(
-        collection.delete::<_, ID>(&repository, 1).await,
+        collection.delete(&repository, 1).await,
         Err(FossilDeletionError::TooEarly)
     ));
 
-    let manifest3 = ID { inner: [44; 32] };
+    let manifest3 = ID::new("manifest_2".to_string());
     create_manifest(&repository, &manifest3, &client2, chunks.as_slice()).await;
 
-    assert!(matches!(
-        collection.delete::<_, ID>(&repository, 1).await,
-        Ok(())
-    ));
+    assert!(matches!(collection.delete(&repository, 1).await, Ok(())));
 }
 
 #[tokio::test]
 async fn pipelined_deletion() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let chunks: Vec<ID> = (0..10).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
     create_chunks(&repository, chunks.as_slice()).await;
-    let manifest1 = ID { inner: [42; 32] };
+    let manifest1 = ID::new("manifest_0".to_string());
     create_manifest(&repository, &manifest1, &manifest1, &chunks[..5]).await;
-    let manifest2 = ID { inner: [43; 32] };
+    let manifest2 = ID::new("manifest_1".to_string());
     create_manifest(&repository, &manifest2, &manifest2, &chunks[2..]).await;
-    let manifest3 = ID { inner: [44; 32] };
+    let manifest3 = ID::new("manifest_2".to_string());
     create_manifest(&repository, &manifest3, &manifest3, &chunks[5..]).await;
-    let manifest4 = ID { inner: [45; 32] };
-    let mut builder = FossilCollectionBuilder::<ID, ID>::new();
+    let manifest4 = ID::new("manifest_3".to_string());
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
     for chunk in chunks[..5].iter() {
         builder.add_fossil_candidate(chunk.clone());
     }
     builder.add_seen_manifest(manifest3.clone());
     builder.add_seen_manifest(manifest4);
     let collection = builder.collect_fossils(&repository, 1).await.unwrap();
-    <FileBackend as Repository<ID, ID, ID>>::remove_manifest(&repository, &manifest1)
-        .await
-        .unwrap();
+    repository.remove_manifest(&manifest1).await.unwrap();
     let mut builder = collection.pipelined_delete::<ID>();
     for chunk in &chunks[2..] {
         builder.add_fossil_candidate(chunk.clone());
@@ -146,9 +139,7 @@ async fn pipelined_deletion() {
     assert_fossils(&repository, chunks[..0].iter().cloned()).await;
 
     let collection = builder.collect_fossils(&repository, 1).await.unwrap();
-    <FileBackend as Repository<ID, ID, ID>>::remove_manifest(&repository, &manifest2)
-        .await
-        .unwrap();
+    repository.remove_manifest(&manifest2).await.unwrap();
 
     assert_chunks(&repository, chunks[5..].iter().cloned()).await;
     assert_fossils(&repository, chunks[2..5].iter().cloned()).await;
@@ -163,10 +154,10 @@ async fn pipelined_deletion() {
 
 #[test]
 fn pipelined_deletion_chunks() {
-    let chunks: Vec<ID> = (0..2).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..2).map(|i| ChunkID::new([i; 32])).collect();
     let manifests: Vec<ID> = [42, 43]
         .into_iter()
-        .map(|i| ID { inner: [i; 32] })
+        .map(|i| ID::new(format!("manifest_{}", i)))
         .collect();
     let collection = FossilCollection::from_parts(
         chunks[..1].iter().cloned(),
@@ -192,14 +183,14 @@ fn pipelined_deletion_chunks() {
         builder
             .iter_fossil_candidates()
             .cloned()
-            .collect::<Vec<ID>>(),
+            .collect::<Vec<ChunkID>>(),
         &chunks[..1]
     );
     assert_eq!(
         builder
             .iter_referenced_chunks()
             .cloned()
-            .collect::<Vec<ID>>(),
+            .collect::<Vec<ChunkID>>(),
         &chunks[1..]
     );
     assert!(builder.has_referenced_chunk(&chunks[1]));
@@ -210,8 +201,8 @@ fn pipelined_deletion_chunks() {
 async fn pipelined_move_expired_but_seen_manifest() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let chunks: Vec<ID> = (0..2).map(|i| ID { inner: [i; 32] }).collect();
-    let manifests: Vec<ID> = (3..5).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..2).map(|i| ChunkID::new([i; 32])).collect();
+    let manifests: Vec<ID> = (3..5).map(|i| ID::new(format!("manifest_{}", i))).collect();
     let collection = FossilCollection::from_parts(
         chunks[..1].iter().cloned(),
         manifests[..1].iter().cloned(),
@@ -246,8 +237,8 @@ async fn pipelined_move_expired_but_seen_manifest() {
 async fn pipelined_ignore_seen_but_expired_manifest() {
     let tmpdir = tempdir().unwrap();
     let repository = create_repository(tmpdir.path());
-    let chunks: Vec<ID> = (0..2).map(|i| ID { inner: [i; 32] }).collect();
-    let manifests: Vec<ID> = (3..5).map(|i| ID { inner: [i; 32] }).collect();
+    let chunks: Vec<ChunkID> = (0..2).map(|i| ChunkID::new([i; 32])).collect();
+    let manifests: Vec<ID> = (3..5).map(|i| ID::new(format!("manifest_{}", i))).collect();
     let collection = FossilCollection::from_parts(
         chunks[..1].iter().cloned(),
         manifests[..1].iter().cloned(),
@@ -280,8 +271,8 @@ async fn pipelined_ignore_seen_but_expired_manifest() {
 
 #[test]
 fn pipelined_seen_manifests_no_duplicates() {
-    let manifests: Vec<ID> = (0..5).map(|i| ID { inner: [i; 32] }).collect();
-    let collection: FossilCollection<ID, ID> =
+    let manifests: Vec<ID> = (0..5).map(|i| ID::new(format!("manifest_{}", i))).collect();
+    let collection: FossilCollection<ID, ChunkID> =
         FossilCollection::from_parts([], manifests[..2].iter().cloned(), SystemTime::now());
     let mut builder = collection.pipelined_delete::<ID>();
     for manifest in manifests[1..4].iter() {

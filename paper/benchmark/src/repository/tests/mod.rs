@@ -1,11 +1,10 @@
-//! Test utilities for the files backend
+//! Tests for the file repository
 
 use pin_project::pin_project;
 use std::ffi::OsString;
 use std::path::Path;
 use std::pin::pin;
 use std::task::{Context, Poll};
-use vinculum::backends::files;
 
 mod chunks;
 mod clients;
@@ -54,8 +53,8 @@ where
     }
 }
 
-fn create_repository(tmpdir: &Path) -> files::FileBackend {
+fn create_repository<M, I, C>(tmpdir: &Path) -> super::FileRepository<M, I, C> {
     let repo_path = tmpdir.join("repository");
-    files::initialize(&repo_path).unwrap();
-    files::FileBackend::new(repo_path)
+    super::initialize(&repo_path).unwrap();
+    super::FileRepository::new(repo_path)
 }

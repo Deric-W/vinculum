@@ -1,4 +1,4 @@
-//! Utilities for creating custom backends.
+//! Utilities
 
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 

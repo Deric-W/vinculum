@@ -1,15 +1,17 @@
-//! Backend implemented in the local UNIX file system.
+//! Repository implemented in the local UNIX file system.
 //!
-//! This backend uses types from [`tokio::fs`] and therefore depends on it.
+//! This repository uses types from [`tokio::fs`] and therefore depends on it.
 
 mod builder;
 mod committing;
 mod manifest;
+mod utils;
 
-pub use builder::{ManifestBuilder, ManifestBuilderData, ManifestEncodingError};
-pub use manifest::{Manifest, ManifestChunks, ManifestData, ManifestDecodingError};
+#[cfg(test)]
+mod tests;
 
-use crate::{ChunkBackend, ClientBackend, Repository};
+pub use builder::{ManifestBuilder, ManifestEncodingError};
+pub use manifest::{Manifest, ManifestDecodingError};
 
 use committing::{sync_directory, upload_file, upload_manifest};
 use futures::io::{AsyncRead, AsyncWrite, Error as IoError, Result as IoResult};
@@ -17,15 +19,16 @@ use futures::stream::{Stream, StreamExt};
 use std::ffi::OsString;
 use std::fs::DirBuilder;
 use std::io::ErrorKind;
+use std::marker::PhantomData;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use tokio_stream::wrappers::ReadDirStream;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
-/// Backend implemented in the local UNIX file system.
+/// Repository implemented in the local UNIX file system.
 ///
-/// This backend stores chunks, fossils, clients and manifests using individual
+/// This repository stores chunks, fossils, clients and manifests using individual
 /// files, performing no compression, encryption or further deduplication.
 ///
 /// ## Power loss
@@ -39,12 +42,12 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 ///
 /// Furthermore, the way tokio handles task cancellation allows running operations to
 /// complete on its thread pool after their future has been dropped, requiring a shutdown
-/// of the used tokio runtime should a future of this backend be canceled and
+/// of the used tokio runtime should a future of this repository be canceled and
 /// other operations happen only after its completion.
 ///
 /// ## Trait bounds
 ///
-/// Ids used with this backend will be converted into [`OsString`]s to be used in
+/// Ids used with this repository will be converted into [`OsString`]s to be used in
 /// file names and may therefore not contain path separators or be empty.
 ///
 /// The inverse operation may fail, which is interpreted as an corrupted id.
@@ -57,9 +60,7 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 /// of the creator id, followed by these bytes.
 /// Next will be a sequence of `u8` encoding the length of the byte representation
 /// of a chunk id followed by these bytes until the length is zero.
-/// After that there will be a sequence of u16 encoding the length of a batch of
-/// additional data in bytes, followed by it until the length is zero.
-/// Last there will be the timestamp, stored as seconds and nanoseconds since the
+/// After that there will be the timestamp, stored as seconds and nanoseconds since the
 /// UNIX epoch.
 ///
 /// This limits the length of the creator id to [`u8::MAX`] bytes and the length
@@ -67,22 +68,22 @@ use tokio_util::compat::TokioAsyncReadCompatExt;
 ///
 /// All numbers are stored in big-endian and therefore portable between architectures.
 #[derive(Debug, Clone)]
-pub struct FileBackend {
+pub struct FileRepository<M, I, C> {
     directory: Box<Path>,
+    phantom: PhantomData<(M, I, C)>,
 }
 
-impl FileBackend {
+impl<M, I, C> FileRepository<M, I, C> {
     /// Create an instance from an initialized directory.
     ///
-    /// This function assumes the directory was initialized using
-    /// [`initialize`] and that no other backends exists for the client
-    /// for the duration of its existence.
-    pub fn new<P>(directory: P) -> FileBackend
+    /// This function assumes the directory was initialized using [`initialize`].
+    pub fn new<P>(directory: P) -> FileRepository<M, I, C>
     where
         P: AsRef<Path>,
     {
-        FileBackend {
+        FileRepository {
             directory: directory.as_ref().into(),
+            phantom: PhantomData,
         }
     }
 
@@ -114,16 +115,16 @@ impl FileBackend {
         Ok(futures::io::BufWriter::new(Box::pin(writer)))
     }
 
-    async fn list_directory<P, I>(&self, path: P) -> IoResult<impl Stream<Item = IoResult<I>>>
+    async fn list_directory<P, X>(&self, path: P) -> IoResult<impl Stream<Item = IoResult<X>>>
     where
         P: AsRef<Path>,
-        for<'a> I: TryFrom<&'a [u8], Error = ()>,
+        for<'a> X: TryFrom<&'a [u8], Error = ()>,
     {
         let path = self.directory().join(path);
         let stream = ReadDirStream::new(tokio::fs::read_dir(path).await?);
         let ids = stream.filter_map(|res| {
             std::future::ready(match res {
-                Ok(entry) => match I::try_from(entry.file_name().as_encoded_bytes()) {
+                Ok(entry) => match X::try_from(entry.file_name().as_encoded_bytes()) {
                     Ok(id) => Some(Ok(id)),
                     Err(()) => None,
                 },
@@ -133,10 +134,10 @@ impl FileBackend {
         Ok(ids)
     }
 
-    fn create_path_from_id<P, I>(&self, subdirectory: P, id: &I) -> IoResult<PathBuf>
+    fn create_path_from_id<P, X>(&self, subdirectory: P, id: &X) -> IoResult<PathBuf>
     where
         P: AsRef<Path>,
-        for<'a> &'a I: Into<OsString>,
+        for<'a> &'a X: Into<OsString>,
     {
         let string = id.into();
         if string.len() == 0 {
@@ -150,51 +151,57 @@ impl FileBackend {
     }
 }
 
-impl<I> ClientBackend<I> for FileBackend
+impl<M, I, C> FileRepository<M, I, C>
 where
     for<'a> I: TryFrom<&'a [u8], Error = ()>,
     for<'a> &'a I: Into<OsString>,
 {
-    type Error = IoError;
-
-    async fn clients(&self) -> IoResult<impl Stream<Item = IoResult<I>>> {
-        self.list_directory("clients").await
-    }
-
-    async fn client(&self, id: &I) -> IoResult<impl AsyncRead> {
+    /// Request data associated with a client.
+    ///
+    /// Each client can have associated data stored in the repository.
+    pub async fn client(&self, id: &I) -> IoResult<impl AsyncRead> {
         let path = self.create_path_from_id("clients", id)?;
         let file = tokio::fs::File::open(path).await?;
         Ok(tokio::io::BufReader::new(file).compat())
     }
 
-    async fn add_client(&self, id: &I) -> IoResult<impl AsyncWrite> {
+    /// Register a client with the repository.
+    ///
+    /// The client will be registered when the async write is closed.
+    ///
+    /// A client has to be registered with the repository before
+    /// he can perform any operations on it.
+    /// Should the client already be registered with the repository
+    /// its associated data will be overwritten.
+    pub async fn add_client(&self, id: &I) -> IoResult<impl AsyncWrite> {
         let path = self.create_path_from_id("clients", id)?;
         self.upload_file(path).await
     }
 
-    async fn remove_client(&self, id: &I) -> IoResult<()> {
+    /// Remove a client from the repository.
+    ///
+    /// Clients have to finish all pending operations before being removed from the repository.
+    pub async fn remove_client(&self, id: &I) -> IoResult<()> {
         let path = self.create_path_from_id("clients", id)?;
         tokio::fs::remove_file(path).await
     }
 }
 
-impl<C> ChunkBackend<C> for FileBackend
+impl<M, I, C> FileRepository<M, I, C>
 where
     for<'a> C: TryFrom<&'a [u8], Error = ()>,
     for<'a> &'a C: Into<OsString>,
 {
-    type Error = IoError;
-
-    async fn chunks(&self) -> IoResult<impl Stream<Item = IoResult<C>>> {
-        self.list_directory("chunks").await
-    }
-
-    async fn chunk(&self, id: &C) -> IoResult<impl AsyncRead> {
+    /// Request the contents of a chunk.
+    ///
+    /// Its fossil can be used in case the original chunk does not exist.
+    pub async fn chunk(&self, id: &C) -> IoResult<impl AsyncRead> {
         let mut buf = self.directory().to_owned();
         let file_name = id.into();
         if file_name.len() == 0 {
             return Err(IoError::other("received id with length zero"));
         }
+        // retry a second time in case the chunks was fossilized and recovered
         for _ in 0..2 {
             buf.push("chunks");
             buf.push(&file_name);
@@ -216,22 +223,134 @@ where
         Err(ErrorKind::NotFound.into())
     }
 
-    async fn has_chunk(&self, id: &C) -> IoResult<bool> {
+    /// Check whether a chunk exists in the repository.
+    ///
+    /// The result of this query may be used to skip uploading chunks which
+    /// already exist in the repository and may not consider fossils.
+    pub async fn has_chunk(&self, id: &C) -> IoResult<bool> {
         let path = self.create_path_from_id("chunks", id)?;
         tokio::fs::try_exists(path).await
     }
 
-    async fn add_chunk(&self, id: &C) -> IoResult<impl AsyncWrite> {
+    /// Store a chunk in the repository.
+    ///
+    /// The chunk will be added when the async write is closed.
+    ///
+    /// Should a chunk already exist within a repository its contents
+    /// will be overwritten.
+    pub async fn add_chunk(&self, id: &C) -> IoResult<impl AsyncWrite> {
         let path = self.create_path_from_id("chunks", id)?;
         self.upload_file(path).await
     }
+}
 
-    async fn fossils(&self) -> IoResult<impl Stream<Item = IoResult<C>>> {
+impl<M, I, C> FileRepository<M, I, C>
+where
+    for<'a> M: TryFrom<&'a [u8], Error = ()>,
+    for<'a> &'a M: Into<OsString>,
+    for<'a> I: TryFrom<&'a [u8], Error = ()>,
+    for<'a> &'a I: Into<OsString>,
+{
+    /// Create a manifest.
+    ///
+    /// When a manifest with an id has been created recreating it with the
+    /// same id but different content is not allowed.
+    ///
+    /// Furthermore, a client creating a manifest while the same client is downloading a
+    /// chunk can cause the download to fail by making it appear as if the
+    /// chunk does not exist.
+    pub async fn create_manifest(
+        &self,
+        id: &M,
+        client: &I,
+    ) -> Result<ManifestBuilder<C>, ManifestEncodingError> {
+        let path = self
+            .create_path_from_id("manifests", id)
+            .map_err(ManifestEncodingError::IoError)?;
+        let writer = self
+            .upload_manifest(path)
+            .await
+            .map_err(ManifestEncodingError::IoError)?;
+        ManifestBuilder::from_upload(writer, client).await
+    }
+
+    /// Remove a manifest.
+    ///
+    /// Removing a manifest may leave unreferenced chunks behind, which is why
+    /// this operation should be performed after a fossil collection step.
+    pub async fn remove_manifest(&self, id: &M) -> IoResult<()> {
+        let path = self.create_path_from_id("manifests", id)?;
+        tokio::fs::remove_file(path).await
+    }
+}
+
+impl<M, I, C> vinculum::Repository for FileRepository<M, I, C>
+where
+    for<'a> I: TryFrom<&'a [u8], Error = ()>,
+    for<'a> &'a I: Into<OsString>,
+    for<'a> C: TryFrom<&'a [u8], Error = ()>,
+    for<'a> &'a C: Into<OsString>,
+    for<'a> M: TryFrom<&'a [u8], Error = ()>,
+    for<'a> &'a M: Into<OsString>,
+{
+    type ManifestID = M;
+
+    type Error = IoError;
+
+    type Manifest = Manifest<I, C>;
+
+    async fn clients(
+        &self,
+    ) -> Result<
+        impl Stream<Item = Result<<Self::Manifest as vinculum::Manifest>::ClientID, Self::Error>>,
+        Self::Error,
+    > {
+        self.list_directory("clients").await
+    }
+
+    async fn manifests(
+        &self,
+    ) -> Result<impl Stream<Item = Result<Self::ManifestID, Self::Error>>, Self::Error> {
+        self.list_directory("manifests").await
+    }
+
+    async fn manifest(
+        &self,
+        id: &Self::ManifestID,
+    ) -> Result<Self::Manifest, ManifestDecodingError> {
+        let path = self
+            .create_path_from_id("manifests", id)
+            .map_err(ManifestDecodingError::IoError)?;
+        let file = tokio::fs::File::open(path)
+            .await
+            .map_err(ManifestDecodingError::IoError)?;
+        let reader = futures::io::BufReader::new(file.compat());
+        Manifest::from_file(reader).await
+    }
+
+    async fn chunks(
+        &self,
+    ) -> Result<
+        impl Stream<Item = Result<<Self::Manifest as vinculum::Manifest>::ChunkID, Self::Error>>,
+        Self::Error,
+    > {
+        self.list_directory("chunks").await
+    }
+
+    async fn fossils(
+        &self,
+    ) -> Result<
+        impl Stream<Item = Result<<Self::Manifest as vinculum::Manifest>::ChunkID, Self::Error>>,
+        Self::Error,
+    > {
         self.list_directory("fossils").await
     }
 
-    async fn make_fossil(&self, id: &C) -> IoResult<()> {
-        let file_name = id.into();
+    async fn fossilize_chunk(
+        &self,
+        chunk: &<Self::Manifest as vinculum::Manifest>::ChunkID,
+    ) -> Result<(), Self::Error> {
+        let file_name = chunk.into();
         if file_name.len() == 0 {
             return Err(IoError::other("received id with length zero"));
         }
@@ -248,8 +367,11 @@ where
         }
     }
 
-    async fn recover_fossil(&self, id: &C) -> IoResult<()> {
-        let file_name = id.into();
+    async fn recover_fossil(
+        &self,
+        fossil: &<Self::Manifest as vinculum::Manifest>::ChunkID,
+    ) -> Result<(), Self::Error> {
+        let file_name = fossil.into();
         if file_name.len() == 0 {
             return Err(IoError::other("received id with length zero"));
         }
@@ -266,69 +388,16 @@ where
         }
     }
 
-    async fn delete_fossil(&self, id: &C) -> IoResult<()> {
-        let path = self.create_path_from_id("fossils", id)?;
+    async fn delete_fossil(
+        &self,
+        fossil: &<Self::Manifest as vinculum::Manifest>::ChunkID,
+    ) -> Result<(), Self::Error> {
+        let path = self.create_path_from_id("fossils", fossil)?;
         match tokio::fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e),
         }
-    }
-}
-
-impl<M, I, C> Repository<M, I, C> for FileBackend
-where
-    for<'a> I: TryFrom<&'a [u8], Error = ()>,
-    for<'a> &'a I: Into<OsString>,
-    for<'a> C: TryFrom<&'a [u8], Error = ()>,
-    for<'a> &'a C: Into<OsString>,
-    for<'a> M: TryFrom<&'a [u8], Error = ()>,
-    for<'a> &'a M: Into<OsString>,
-{
-    type Error = IoError;
-
-    type Builder = ManifestBuilder;
-
-    type Manifest = Manifest<I, C>;
-
-    async fn manifests(
-        &self,
-    ) -> Result<
-        impl Stream<Item = Result<M, <Self as Repository<M, I, C>>::Error>>,
-        <Self as Repository<M, I, C>>::Error,
-    > {
-        self.list_directory("manifests").await
-    }
-
-    async fn manifest(&self, id: &M) -> Result<Self::Manifest, ManifestDecodingError> {
-        let path = self
-            .create_path_from_id("manifests", id)
-            .map_err(ManifestDecodingError::IoError)?;
-        let file = tokio::fs::File::open(path)
-            .await
-            .map_err(ManifestDecodingError::IoError)?;
-        let reader = futures::io::BufReader::new(file.compat());
-        Manifest::from_file(reader).await
-    }
-
-    async fn create_manifest(
-        &self,
-        id: &M,
-        client: &I,
-    ) -> Result<Self::Builder, ManifestEncodingError> {
-        let path = self
-            .create_path_from_id("manifests", id)
-            .map_err(ManifestEncodingError::IoError)?;
-        let writer = self
-            .upload_manifest(path)
-            .await
-            .map_err(ManifestEncodingError::IoError)?;
-        ManifestBuilder::from_upload(writer, client).await
-    }
-
-    async fn remove_manifest(&self, id: &M) -> Result<(), <Self as Repository<M, I, C>>::Error> {
-        let path = self.create_path_from_id("manifests", id)?;
-        tokio::fs::remove_file(path).await
     }
 }
 

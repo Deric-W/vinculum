@@ -1,23 +1,22 @@
 //! Tests for commiting new files
 
 use super::{create_repository, PollOnce};
-use crate::ID;
+use crate::{repository::FileRepository, ChunkID, ID};
 use futures::io::AsyncWriteExt;
 use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::pin::pin;
 use tempfile::tempdir;
-use vinculum::ChunkBackend;
 
 #[tokio::test]
 async fn moves_file_on_commit() {
     let tmpdir = tempdir().unwrap();
-    let backend = create_repository(tmpdir.path());
-    let chunk = ID { inner: [0; 32] };
+    let backend: FileRepository<ID, ID, ChunkID> = create_repository(tmpdir.path());
+    let chunk = ChunkID::new([0; 32]);
     let chunks_path = backend
         .directory()
         .join("chunks")
-        .join(<&ID as Into<OsString>>::into(&chunk));
+        .join(<&ChunkID as Into<OsString>>::into(&chunk));
     let mut upload = pin!(backend.add_chunk(&chunk).await.unwrap());
 
     assert!(matches!(
@@ -46,12 +45,12 @@ async fn moves_file_on_commit() {
 #[tokio::test]
 async fn commits_correct_content() {
     let tmpdir = tempdir().unwrap();
-    let backend = create_repository(tmpdir.path());
-    let chunk = ID { inner: [0; 32] };
+    let backend: FileRepository<ID, ID, ChunkID> = create_repository(tmpdir.path());
+    let chunk = ChunkID::new([0; 32]);
     let chunks_path = backend
         .directory()
         .join("chunks")
-        .join(<&ID as Into<OsString>>::into(&chunk));
+        .join(<&ChunkID as Into<OsString>>::into(&chunk));
     let mut upload = pin!(backend.add_chunk(&chunk).await.unwrap());
     let test_string = "This is a test!!!";
     let mut buf = String::with_capacity(test_string.len() * 1000000);
@@ -67,12 +66,12 @@ async fn commits_correct_content() {
 #[tokio::test]
 async fn removes_file_on_drop() {
     let tmpdir = tempdir().unwrap();
-    let backend = create_repository(tmpdir.path());
-    let chunk = ID { inner: [0; 32] };
+    let backend: FileRepository<ID, ID, ChunkID> = create_repository(tmpdir.path());
+    let chunk = ChunkID::new([0; 32]);
     let chunks_path = backend
         .directory()
         .join("chunks")
-        .join(<&ID as Into<OsString>>::into(&chunk));
+        .join(<&ChunkID as Into<OsString>>::into(&chunk));
     {
         let mut upload = pin!(backend.add_chunk(&chunk).await.unwrap());
         upload.write_all(&[0; 32]).await.unwrap();
@@ -91,12 +90,12 @@ async fn removes_file_on_drop() {
 #[tokio::test]
 async fn removes_file_on_drop_after_pending_close() {
     let tmpdir = tempdir().unwrap();
-    let backend = create_repository(tmpdir.path());
-    let chunk = ID { inner: [0; 32] };
+    let backend: FileRepository<ID, ID, ChunkID> = create_repository(tmpdir.path());
+    let chunk = ChunkID::new([0; 32]);
     let chunks_path = backend
         .directory()
         .join("chunks")
-        .join(<&ID as Into<OsString>>::into(&chunk));
+        .join(<&ChunkID as Into<OsString>>::into(&chunk));
     {
         let mut upload = pin!(backend.add_chunk(&chunk).await.unwrap());
 
@@ -120,12 +119,12 @@ async fn removes_file_on_drop_after_pending_close() {
 #[tokio::test]
 async fn removes_file_on_rename_failure() {
     let tmpdir = tempdir().unwrap();
-    let backend = create_repository(tmpdir.path());
-    let chunk = ID { inner: [0; 32] };
+    let backend: FileRepository<ID, ID, ChunkID> = create_repository(tmpdir.path());
+    let chunk = ChunkID::new([0; 32]);
     let chunks_path = backend
         .directory()
         .join("chunks")
-        .join(<&ID as Into<OsString>>::into(&chunk));
+        .join(<&ChunkID as Into<OsString>>::into(&chunk));
     {
         let mut upload = pin!(backend.add_chunk(&chunk).await.unwrap());
         let upload_path = backend

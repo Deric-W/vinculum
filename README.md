@@ -13,8 +13,8 @@ such as [Duplicacy](https://duplicacy.com) as described in their
 
 The most important object is the repository, which stores chunks, clients
 and manifests and is available to a number of clients.
-It is represented by the `Repository` trait, which has implementations
-defined in the `backends` module.
+It is represented by the `Repository` trait, which is designed to be
+implemented by you.
 
 Clients represent individual users which may perform operations on the
 repository at the same time as other clients, like creating chunks or
@@ -52,5 +52,4 @@ creation of the next one using `PipelinedFossilCollectionBuilder`.
 
 ## Features
 
-- `files`: enables a repository implementation utilizing the local file system.
 - `serde`: implements `serde::Serialize` and `serde::Deserialize` for `FossilCollection`.
