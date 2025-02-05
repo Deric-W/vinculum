@@ -50,6 +50,17 @@ delete fossils or turn them back into chunks.
 It is possible to combine the deletion of a fossil collection with the
 creation of the next one using `PipelinedFossilCollectionBuilder`.
 
+## Concurrency
+
+While this crate does not depend on a particular async runtime it performs
+actions concurrently when possible, which can be controlled by the `concurrency`
+argument of some functions.
+
+This is achieved by using `futures::stream::FuturesUnordered`, which in
+turn requires that any blocking operations (for example filesystem operations
+or hashing large amounts of data) are queued on an external thread pool should
+parallel execution be desired.
+
 ## Features
 
 - `serde`: implements `serde::Serialize` and `serde::Deserialize` for `FossilCollection`.

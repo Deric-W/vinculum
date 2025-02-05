@@ -160,12 +160,13 @@ fn main() {
             store_collection(&collection, &args.collection);
         }
         Command::Delete(args) => {
+            let parallelism: usize = args.parallelism.into();
             let collection = load_collection(&args.collection);
             let repository = create_repository(args.repository);
             let runtime = create_runtime();
             if args.collect.is_empty() {
                 runtime
-                    .block_on(collection.delete(&repository, args.parallelism.into()))
+                    .block_on(collection.delete(&repository, parallelism))
                     .unwrap();
                 std::fs::remove_file(args.collection).unwrap();
             } else {

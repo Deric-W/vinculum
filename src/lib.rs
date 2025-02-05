@@ -44,6 +44,17 @@
 //! It is possible to combine the deletion of a fossil collection with the
 //! creation of the next one using [`PipelinedFossilCollectionBuilder`].
 //!
+//! ## Concurrency
+//!
+//! While this crate does not depend on a particular async runtime it performs
+//! actions concurrently when possible, which can be controlled by the `concurrency`
+//! argument of some functions.
+//!
+//! This is achieved by using [`futures::stream::FuturesUnordered`], which in
+//! turn requires that any blocking operations (for example filesystem operations
+//! or hashing large amounts of data) are queued on an external thread pool should
+//! parallel execution be desired.
+//!
 //! ## Features
 //!
 //! - `serde`: implements [`serde::Serialize`] and [`serde::Deserialize`] for [`FossilCollection`].
@@ -361,10 +372,14 @@ impl<M, C> FossilCollection<M, C> {
     ///
     /// Based on whether a fossil is referenced by these manifests or not
     /// it will either be deleted or recovered back into a chunk.
+    ///
+    /// The `concurrency` argument controls the amount of actions executed
+    /// concurrently, either as an upper limit (which can be passed without wrapping
+    /// it in an [`Option`] first) or no limit when [`None`] or zero is passed.
     pub async fn delete<R>(
         &self,
         repository: &R,
-        parallelism: usize,
+        concurrency: impl Into<Option<usize>>,
     ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
         R: Repository<ManifestID = M>,
@@ -373,11 +388,12 @@ impl<M, C> FossilCollection<M, C> {
         <R::Manifest as Manifest>::ClientID: Hash + Eq,
         <R::Manifest as Manifest>::ChunkID: Hash + Eq,
     {
+        let concurrency: Option<usize> = concurrency.into();
         let mut deleter = SimpleFossilDeleter::new(self);
         deleter
-            .add_missing_manifests(repository, parallelism)
+            .add_missing_manifests(repository, concurrency)
             .await?;
-        deleter.delete(repository, parallelism).await
+        deleter.delete(repository, concurrency).await
     }
 
     /// Delete this fossil collection while also preparing a new one.
@@ -484,16 +500,23 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     ///
     /// Should this operation fail it is possible to retry it by extracting the builder
     /// from the returned [`FossilCollectionError`].
+    ///
+    /// The `concurrency` argument controls the amount of actions executed
+    /// concurrently, either as an upper limit (which can be passed without wrapping
+    /// it in an [`Option`] first) or no limit when [`None`] or zero is passed.
     pub async fn collect_fossils<R>(
         self,
         repository: &R,
-        parallelism: usize,
+        concurrency: impl Into<Option<usize>>,
     ) -> Result<FossilCollection<M, C>, FossilCollectionError<M, C, R::Error>>
     where
         R: Repository<ManifestID = M>,
         R::Manifest: Manifest<ChunkID = C>,
     {
-        if let Err(e) = self.apply_fossil_operations(repository, parallelism).await {
+        if let Err(e) = self
+            .apply_fossil_operations(repository, concurrency.into())
+            .await
+        {
             return Err(FossilCollectionError::new(self, e));
         }
 
@@ -509,7 +532,7 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     async fn apply_fossil_operations<R>(
         &self,
         repository: &R,
-        parallelism: usize,
+        concurrency: Option<usize>,
     ) -> Result<(), R::Error>
     where
         R: Repository<ManifestID = M>,
@@ -517,7 +540,7 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     {
         let fossil_stream = futures::stream::iter(self.iter_fossil_candidates().map(Ok));
         fossil_stream
-            .try_for_each_concurrent(parallelism, |fossil| repository.fossilize_chunk(fossil))
+            .try_for_each_concurrent(concurrency, |fossil| repository.fossilize_chunk(fossil))
             .await?;
 
         Ok(())
@@ -577,7 +600,7 @@ where
     pub async fn collect_all_fossils<R>(
         self,
         repository: &R,
-        parallelism: usize,
+        concurrency: impl Into<Option<usize>>,
     ) -> Result<FossilCollection<M, C>, FossilCollectionError<M, C, R::Error>>
     where
         R: Repository<ManifestID = M>,
@@ -600,7 +623,10 @@ where
             }
         }
 
-        if let Err(e) = self.apply_fossil_operations(repository, parallelism).await {
+        if let Err(e) = self
+            .apply_fossil_operations(repository, concurrency.into())
+            .await
+        {
             return Err(FossilCollectionError::new(self, e));
         }
 
@@ -675,16 +701,16 @@ where
     I: Hash + Eq,
     C: Hash + Eq,
 {
-    pub async fn delete<R>(
+    async fn delete<R>(
         &mut self,
         repository: &R,
-        parallelism: usize,
+        concurrency: Option<usize>,
     ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
         R: Repository<ManifestID = M>,
         R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
-        <Self as FossilDeleter<M, I, C>>::delete(self, repository, parallelism).await
+        <Self as FossilDeleter<M, I, C>>::delete(self, repository, concurrency).await
     }
 }
 
@@ -913,7 +939,7 @@ where
     pub async fn delete<R>(
         mut self,
         repository: &R,
-        parallelism: usize,
+        concurrency: impl Into<Option<usize>>,
     ) -> Result<
         FossilCollectionBuilder<M, C>,
         PipelinedFossilDeletionError<
@@ -930,7 +956,9 @@ where
     {
         // do not include manifests of fossil collection or expiring manifests
         // in builder since they might reference the fossil candidates
-        match <Self as FossilDeleter<M, I, C>>::delete(&mut self, repository, parallelism).await {
+        match <Self as FossilDeleter<M, I, C>>::delete(&mut self, repository, concurrency.into())
+            .await
+        {
             Ok(()) => Ok(self.builder),
             Err(e) => Err(PipelinedFossilDeletionError::new(self, e)),
         }
@@ -954,7 +982,7 @@ trait FossilDeleter<M, I, C> {
     async fn add_missing_manifests<R>(
         &mut self,
         repository: &R,
-        parallelism: usize,
+        concurrency: Option<usize>,
     ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
         R: Repository<ManifestID = M>,
@@ -968,7 +996,7 @@ trait FossilDeleter<M, I, C> {
             .map_err(FossilDeletionError::RepositoryError);
 
         manifest_stream
-            .try_for_each_concurrent(parallelism, |manifest| {
+            .try_for_each_concurrent(concurrency, |manifest| {
                 check_manifest(repository, manifest, &cell)
             })
             .await?;
@@ -978,7 +1006,7 @@ trait FossilDeleter<M, I, C> {
     async fn delete<R>(
         &mut self,
         repository: &R,
-        parallelism: usize,
+        concurrency: Option<usize>,
     ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
         R: Repository<ManifestID = M>,
@@ -998,12 +1026,12 @@ trait FossilDeleter<M, I, C> {
         }
 
         // iterate through manifests a second time to make sure manifests created during iteration are picked up
-        self.add_missing_manifests(repository, parallelism).await?;
+        self.add_missing_manifests(repository, concurrency).await?;
 
         // deal with fossils
         let fossil_stream = futures::stream::iter(self.fossil_collection().iter_fossils().map(Ok));
         fossil_stream
-            .try_for_each_concurrent(parallelism, |fossil| async {
+            .try_for_each_concurrent(concurrency, |fossil| async {
                 let res = if self.has_referenced_chunk(fossil) {
                     repository.recover_fossil(fossil).await
                 } else {
