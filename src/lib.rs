@@ -50,7 +50,6 @@
 
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-use futures::future::FutureExt;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -516,13 +515,10 @@ impl<M, C> FossilCollectionBuilder<M, C> {
         R: Repository<ManifestID = M>,
         R::Manifest: Manifest<ChunkID = C>,
     {
-        let mut fossil_stream = futures::stream::iter(self.iter_fossil_candidates())
-            .map(|id| Ok(repository.fossilize_chunk(id)))
-            .try_buffer_unordered(parallelism);
-
-        while let Some(res) = fossil_stream.next().await {
-            res?;
-        }
+        let fossil_stream = futures::stream::iter(self.iter_fossil_candidates().map(Ok));
+        fossil_stream
+            .try_for_each_concurrent(parallelism, |fossil| repository.fossilize_chunk(fossil))
+            .await?;
 
         Ok(())
     }
@@ -965,16 +961,17 @@ trait FossilDeleter<M, I, C> {
         R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         let cell = RefCell::new(&mut *self);
-        let mut manifest_stream = pin!(repository
+        let manifest_stream = repository
             .manifests()
             .await
             .map_err(FossilDeletionError::RepositoryError)?
-            .map_ok(|manifest| check_manifest(repository, manifest, &cell))
-            .map_err(FossilDeletionError::RepositoryError)
-            .try_buffer_unordered(parallelism));
-        while let Some(res) = manifest_stream.next().await {
-            res?;
-        }
+            .map_err(FossilDeletionError::RepositoryError);
+
+        manifest_stream
+            .try_for_each_concurrent(parallelism, |manifest| {
+                check_manifest(repository, manifest, &cell)
+            })
+            .await?;
         Ok(())
     }
 
@@ -1004,18 +1001,17 @@ trait FossilDeleter<M, I, C> {
         self.add_missing_manifests(repository, parallelism).await?;
 
         // deal with fossils
-        let mut fossil_stream = futures::stream::iter(self.fossil_collection().iter_fossils())
-            .map(|fossil| {
-                if self.has_referenced_chunk(fossil) {
-                    Ok(repository.recover_fossil(fossil).left_future())
+        let fossil_stream = futures::stream::iter(self.fossil_collection().iter_fossils().map(Ok));
+        fossil_stream
+            .try_for_each_concurrent(parallelism, |fossil| async {
+                let res = if self.has_referenced_chunk(fossil) {
+                    repository.recover_fossil(fossil).await
                 } else {
-                    Ok(repository.delete_fossil(fossil).right_future())
-                }
+                    repository.delete_fossil(fossil).await
+                };
+                res.map_err(FossilDeletionError::RepositoryError)
             })
-            .try_buffer_unordered(parallelism);
-        while let Some(res) = fossil_stream.next().await {
-            res.map_err(FossilDeletionError::RepositoryError)?;
-        }
+            .await?;
 
         Ok(())
     }
