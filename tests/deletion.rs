@@ -284,3 +284,43 @@ fn pipelined_seen_manifests_no_duplicates() {
 
     assert_eq_unordered(builder.iter_seen_manifests(), manifests.iter());
 }
+
+#[test]
+fn pipelined_seen_manifests() {
+    let manifests: Vec<ID> = (0..20)
+        .map(|i| ID::new(format!("manifest_{}", i)))
+        .collect();
+    let collection: FossilCollection<ID, ChunkID> =
+        FossilCollection::from_parts([], manifests[..10].iter().cloned(), SystemTime::now());
+    let mut builder = collection.pipelined_delete::<ID>();
+    let client = ID::new("client".to_string());
+    for manifest in manifests[5..15].iter() {
+        builder.add_seen_manifest(manifest.clone(), client.clone(), SystemTime::now());
+    }
+    for manifest in manifests[10..].iter() {
+        builder.add_expiring_manifest(manifest.clone(), client.clone(), SystemTime::now());
+    }
+
+    assert_eq_unordered(builder.iter_seen_manifests(), &manifests);
+}
+
+#[test]
+fn pipelined_seen_manifests_fused() {
+    let manifests: Vec<ID> = (0..20)
+        .map(|i| ID::new(format!("manifest_{}", i)))
+        .collect();
+    let collection: FossilCollection<ID, ChunkID> =
+        FossilCollection::from_parts([], manifests[..10].iter().cloned(), SystemTime::now());
+    let mut builder = collection.pipelined_delete::<ID>();
+    let client = ID::new("client".to_string());
+    for manifest in manifests[5..15].iter() {
+        builder.add_seen_manifest(manifest.clone(), client.clone(), SystemTime::now());
+    }
+    for manifest in manifests[10..].iter() {
+        builder.add_expiring_manifest(manifest.clone(), client.clone(), SystemTime::now());
+    }
+    let mut iter = builder.iter_seen_manifests();
+    for _ in iter.by_ref() {}
+
+    assert!(iter.next().is_none());
+}

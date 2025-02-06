@@ -5,6 +5,7 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::hash::Hash;
+use std::iter::{ExactSizeIterator, FusedIterator, Iterator};
 use std::pin::pin;
 use std::time::SystemTime;
 use thiserror::Error;
@@ -40,6 +41,90 @@ impl<M, C, E> FossilCollectionError<M, C, E> {
     }
 }
 
+/// Iterator produced by [`FossilCollectionBuilder::iter_fossil_candidates`].
+#[derive(Debug)]
+pub struct FossilCandidates<'a, C> {
+    inner: std::collections::hash_set::Iter<'a, C>,
+}
+
+impl<C> FossilCandidates<'_, C> {
+    fn new(inner: std::collections::hash_set::Iter<C>) -> FossilCandidates<C> {
+        FossilCandidates { inner }
+    }
+}
+
+impl<'a, C> Iterator for FossilCandidates<'a, C> {
+    type Item = &'a C;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<C> FusedIterator for FossilCandidates<'_, C> {}
+
+impl<C> ExactSizeIterator for FossilCandidates<'_, C> {}
+
+/// Iterator produced by [`FossilCollectionBuilder::iter_seen_manifests`].
+#[derive(Debug)]
+pub struct BuilderSeenManifests<'a, M> {
+    inner: std::collections::hash_set::Iter<'a, M>,
+}
+
+impl<M> BuilderSeenManifests<'_, M> {
+    fn new(inner: std::collections::hash_set::Iter<M>) -> BuilderSeenManifests<'_, M> {
+        BuilderSeenManifests { inner }
+    }
+}
+
+impl<'a, M> Iterator for BuilderSeenManifests<'a, M> {
+    type Item = &'a M;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<M> FusedIterator for BuilderSeenManifests<'_, M> {}
+
+impl<M> ExactSizeIterator for BuilderSeenManifests<'_, M> {}
+
+/// Iterator produced by [`FossilCollectionBuilder::iter_referenced_chunks`].
+#[derive(Debug)]
+pub struct ReferencedChunks<'a, C> {
+    inner: std::collections::hash_set::Iter<'a, C>,
+}
+
+impl<C> ReferencedChunks<'_, C> {
+    fn new(inner: std::collections::hash_set::Iter<C>) -> ReferencedChunks<C> {
+        ReferencedChunks { inner }
+    }
+}
+
+impl<'a, C> Iterator for ReferencedChunks<'a, C> {
+    type Item = &'a C;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<C> FusedIterator for ReferencedChunks<'_, C> {}
+
+impl<C> ExactSizeIterator for ReferencedChunks<'_, C> {}
+
 /// Builder for creating fossil collections.
 ///
 /// This builder receives chunks which should be deleted and manifests
@@ -74,8 +159,8 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     }
 
     /// The chunks marked as fossil candidates.
-    pub fn iter_fossil_candidates(&self) -> std::collections::hash_set::Iter<C> {
-        self.fossil_candidates.iter()
+    pub fn iter_fossil_candidates(&self) -> FossilCandidates<C> {
+        FossilCandidates::new(self.fossil_candidates.iter())
     }
 
     /// The number of referenced chunks.
@@ -84,8 +169,8 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     }
 
     /// Iterate through the currently referenced chunks.
-    pub fn iter_referenced_chunks(&self) -> std::collections::hash_set::Iter<C> {
-        self.referenced_chunks.iter()
+    pub fn iter_referenced_chunks(&self) -> ReferencedChunks<C> {
+        ReferencedChunks::new(self.referenced_chunks.iter())
     }
 
     /// The number of seen manifests.
@@ -94,8 +179,8 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     }
 
     /// The manifests seen by this builder.
-    pub fn iter_seen_manifests(&self) -> std::collections::hash_set::Iter<M> {
-        self.seen_manifests.iter()
+    pub fn iter_seen_manifests(&self) -> BuilderSeenManifests<M> {
+        BuilderSeenManifests::new(self.seen_manifests.iter())
     }
 
     /// Perform the fossil collection operation, creating a fossil collection.

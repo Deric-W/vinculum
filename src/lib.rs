@@ -65,15 +65,21 @@ mod collection;
 mod deletion;
 mod pipelined;
 
-pub use collection::{FossilCollectionBuilder, FossilCollectionError};
+pub use collection::{
+    BuilderSeenManifests, FossilCandidates, FossilCollectionBuilder, FossilCollectionError,
+    ReferencedChunks,
+};
 pub use deletion::FossilDeletionError;
 use deletion::{FossilDeleter, SimpleFossilDeleter};
 use futures::stream::Stream;
-pub use pipelined::{PipelinedFossilCollectionBuilder, PipelinedFossilDeletionError};
+pub use pipelined::{
+    PipelinedFossilCollectionBuilder, PipelinedFossilDeletionError, PipelinedSeenManifests,
+};
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::future::Future;
 use std::hash::Hash;
+use std::iter::{ExactSizeIterator, FusedIterator, Iterator};
 use std::time::SystemTime;
 
 /// A repository storing clients, chunks and manifests.
@@ -220,6 +226,62 @@ pub trait Manifest: Stream<Item = Result<Self::ChunkID, Self::Error>> + Unpin {
     ) -> impl Future<Output = Result<(Self::ClientID, SystemTime), Self::Error>>;
 }
 
+/// Iterator produced by [`FossilCollection::iter_fossils`].
+#[derive(Debug)]
+pub struct Fossils<'a, C> {
+    inner: std::slice::Iter<'a, C>,
+}
+
+impl<C> Fossils<'_, C> {
+    fn new(inner: std::slice::Iter<C>) -> Fossils<C> {
+        Fossils { inner }
+    }
+}
+
+impl<'a, C> Iterator for Fossils<'a, C> {
+    type Item = &'a C;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<C> FusedIterator for Fossils<'_, C> {}
+
+impl<C> ExactSizeIterator for Fossils<'_, C> {}
+
+/// Iterator produced by [`FossilCollection::iter_seen_manifests`].
+#[derive(Debug)]
+pub struct CollectionSeenManifests<'a, M> {
+    inner: std::collections::hash_set::Iter<'a, M>,
+}
+
+impl<M> CollectionSeenManifests<'_, M> {
+    fn new(inner: std::collections::hash_set::Iter<M>) -> CollectionSeenManifests<'_, M> {
+        CollectionSeenManifests { inner }
+    }
+}
+
+impl<'a, M> Iterator for CollectionSeenManifests<'a, M> {
+    type Item = &'a M;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<M> FusedIterator for CollectionSeenManifests<'_, M> {}
+
+impl<M> ExactSizeIterator for CollectionSeenManifests<'_, M> {}
+
 /// A set of fossils await either recovery or deletion.
 ///
 /// When deleting unreferenced chunks there is the possibility that deleting them
@@ -295,8 +357,8 @@ impl<M, C> FossilCollection<M, C> {
     }
 
     /// The fossils in this collection, without duplicates.
-    pub fn iter_fossils(&self) -> std::slice::Iter<C> {
-        self.fossils.iter()
+    pub fn iter_fossils(&self) -> Fossils<C> {
+        Fossils::new(self.fossils.iter())
     }
 
     /// The number of manifests seen when creating this collection.
@@ -308,8 +370,8 @@ impl<M, C> FossilCollection<M, C> {
     ///
     /// They are used to limit the number of manifests which need
     /// to be checked on deletion, see [`FossilCollection::has_seen_manifest`].
-    pub fn iter_seen_manifests(&self) -> std::collections::hash_set::Iter<M> {
-        self.seen_manifests.iter()
+    pub fn iter_seen_manifests(&self) -> CollectionSeenManifests<M> {
+        CollectionSeenManifests::new(self.seen_manifests.iter())
     }
 
     /// Check whether a specific manifest was seen when creating this collection.

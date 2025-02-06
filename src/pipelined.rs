@@ -1,10 +1,14 @@
 //! Implementations of pipelined fossil collection and deletion.
 
 use crate::deletion::FossilDeleter;
-use crate::{FossilCollection, FossilCollectionBuilder, FossilDeletionError, Manifest, Repository};
+use crate::{
+    BuilderSeenManifests, CollectionSeenManifests, FossilCandidates, FossilCollection,
+    FossilCollectionBuilder, FossilDeletionError, Manifest, ReferencedChunks, Repository,
+};
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::hash::Hash;
+use std::iter::{Chain, FusedIterator, Iterator};
 use std::time::SystemTime;
 use thiserror::Error;
 
@@ -41,6 +45,81 @@ impl<'a, M, I, C, E> PipelinedFossilDeletionError<'a, M, I, C, E> {
         (self.builder, self.error)
     }
 }
+
+/// Workaround since [`std::iter::Filter`] requires naming the closure.
+#[derive(Debug)]
+struct NotInSet<'a, M> {
+    inner: Chain<BuilderSeenManifests<'a, M>, std::collections::hash_set::Iter<'a, M>>,
+    set: &'a HashSet<M>,
+}
+
+impl<'a, M> NotInSet<'a, M> {
+    fn new(
+        seen_manifests: BuilderSeenManifests<'a, M>,
+        expiring_manifests: std::collections::hash_set::Iter<'a, M>,
+        set: &'a HashSet<M>,
+    ) -> NotInSet<'a, M> {
+        NotInSet {
+            inner: seen_manifests.chain(expiring_manifests),
+            set,
+        }
+    }
+}
+
+impl<'a, M> Iterator for NotInSet<'a, M>
+where
+    M: Eq + Hash,
+{
+    type Item = &'a M;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.find(|id| !self.set.contains(id))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.inner.size_hint();
+        (0, upper) // can't know a lower bound, due to the filtering
+    }
+}
+
+impl<M> FusedIterator for NotInSet<'_, M> where M: Eq + Hash {}
+
+/// Iterator produced by [`PipelinedFossilCollectionBuilder::iter_seen_manifests`].
+#[derive(Debug)]
+pub struct PipelinedSeenManifests<'a, M> {
+    inner: Chain<NotInSet<'a, M>, CollectionSeenManifests<'a, M>>,
+}
+
+impl<'a, M> PipelinedSeenManifests<'a, M>
+where
+    M: Eq + Hash,
+{
+    fn new(
+        seen_manifests: NotInSet<'a, M>,
+        collection_manifests: CollectionSeenManifests<'a, M>,
+    ) -> PipelinedSeenManifests<'a, M> {
+        PipelinedSeenManifests {
+            inner: seen_manifests.chain(collection_manifests),
+        }
+    }
+}
+
+impl<'a, M> Iterator for PipelinedSeenManifests<'a, M>
+where
+    M: Eq + Hash,
+{
+    type Item = &'a M;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<M> FusedIterator for PipelinedSeenManifests<'_, M> where M: Eq + Hash {}
 
 /// Combine fossil deletion with fossil collection.
 ///
@@ -84,7 +163,7 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
     }
 
     /// Iterate through the chunks currently marked as fossil candidates.
-    pub fn iter_fossil_candidates(&self) -> std::collections::hash_set::Iter<C> {
+    pub fn iter_fossil_candidates(&self) -> FossilCandidates<C> {
         self.builder.iter_fossil_candidates()
     }
 
@@ -94,7 +173,7 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
     }
 
     /// Iterate through the currently referenced chunks.
-    pub fn iter_referenced_chunks(&self) -> std::collections::hash_set::Iter<C> {
+    pub fn iter_referenced_chunks(&self) -> ReferencedChunks<C> {
         self.builder.iter_referenced_chunks()
     }
 }
@@ -105,14 +184,13 @@ where
 {
     /// Iterate through all manifests which where seen by either this builder
     /// or its associated fossil collection.
-    pub fn iter_seen_manifests(&self) -> impl Iterator<Item = &M> {
-        let seen_manifests = self
-            .builder
-            .iter_seen_manifests()
-            .chain(self.expiring_manifests.iter());
-        seen_manifests
-            .filter(|id| !self.fossil_collection.has_seen_manifest(id))
-            .chain(self.fossil_collection.iter_seen_manifests())
+    pub fn iter_seen_manifests(&self) -> PipelinedSeenManifests<M> {
+        let seen_manifests = NotInSet::new(
+            self.builder.iter_seen_manifests(),
+            self.expiring_manifests.iter(),
+            &self.fossil_collection.seen_manifests,
+        );
+        PipelinedSeenManifests::new(seen_manifests, self.fossil_collection.iter_seen_manifests())
     }
 
     /// Check whether a manifest has been seen by this builder or its fossil collection.

@@ -140,3 +140,113 @@ fn merge_collections() {
     assert_eq_unordered(collection1.iter_seen_manifests(), manifests[2..8].iter());
     assert_eq!(collection1.timestamp(), timestamp2);
 }
+
+#[test]
+fn fossils_size_hint() {
+    let fossils: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
+    let collection: FossilCollection<ID, ChunkID> =
+        FossilCollection::from_parts(fossils, [], SystemTime::now());
+
+    assert_eq!(collection.iter_fossils().size_hint(), (10, Some(10)));
+}
+
+#[test]
+fn fossils_fused() {
+    let fossils: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
+    let collection: FossilCollection<ID, ChunkID> =
+        FossilCollection::from_parts(fossils, [], SystemTime::now());
+    let mut iter = collection.iter_fossils();
+    for _ in iter.by_ref() {}
+
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn seen_manifests_size_hint() {
+    let manifests: Vec<ID> = (10..20)
+        .map(|i| ID::new(format!("manifest_{}", i)))
+        .collect();
+    let collection: FossilCollection<ID, ChunkID> =
+        FossilCollection::from_parts([], manifests, SystemTime::now());
+
+    assert_eq!(collection.iter_seen_manifests().size_hint(), (10, Some(10)));
+}
+
+#[test]
+fn seen_manifests_fused() {
+    let manifests: Vec<ID> = (10..20)
+        .map(|i| ID::new(format!("manifest_{}", i)))
+        .collect();
+    let collection: FossilCollection<ID, ChunkID> =
+        FossilCollection::from_parts([], manifests, SystemTime::now());
+    let mut iter = collection.iter_seen_manifests();
+    for _ in iter.by_ref() {}
+
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn fossil_candidates_size_hint() {
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
+    for chunk in 0..10 {
+        builder.add_fossil_candidate(ChunkID::new([chunk; 32]));
+    }
+
+    assert_eq!(builder.iter_fossil_candidates().size_hint(), (10, Some(10)));
+}
+
+#[test]
+fn fossil_candidates_fused() {
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
+    for chunk in 0..10 {
+        builder.add_fossil_candidate(ChunkID::new([chunk; 32]));
+    }
+    let mut iter = builder.iter_fossil_candidates();
+    for _ in iter.by_ref() {}
+
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn builder_seen_manifests_size_hint() {
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
+    for manifest in 0..10 {
+        builder.add_seen_manifest(ID::new(format!("manifest_{}", manifest)));
+    }
+
+    assert_eq!(builder.iter_seen_manifests().size_hint(), (10, Some(10)));
+}
+
+#[test]
+fn builder_seen_manifests_fused() {
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
+    for manifest in 0..10 {
+        builder.add_seen_manifest(ID::new(format!("manifest_{}", manifest)));
+    }
+    let mut iter = builder.iter_seen_manifests();
+    for _ in iter.by_ref() {}
+
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn referenced_chunks_size_hint() {
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
+    for chunk in 0..10 {
+        builder.add_referenced_chunk(ChunkID::new([chunk; 32]));
+    }
+
+    assert_eq!(builder.iter_referenced_chunks().size_hint(), (10, Some(10)));
+}
+
+#[test]
+fn referenced_chunks_fused() {
+    let mut builder = FossilCollectionBuilder::<ID, ChunkID>::new();
+    for chunk in 0..10 {
+        builder.add_referenced_chunk(ChunkID::new([chunk; 32]));
+    }
+    let mut iter = builder.iter_referenced_chunks();
+    for _ in iter.by_ref() {}
+
+    assert!(iter.next().is_none());
+}
