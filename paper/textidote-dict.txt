@@ -4,3 +4,9 @@ Duplicacy
 Vinculum
 deduplication
 deduplicated
+deduplicate
+rsnapshot
+restic
+Duplicati
+Kopia
+Bacula

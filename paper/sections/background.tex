@@ -1,0 +1,344 @@
+\chapter{Background}\label{ch:background}
+
+The following chapter is intended to give readers an overview about the
+subject and state of the art of open source backup solutions.
+It will also define important concepts used throughout this thesis.
+
+\section{Current developments and challenges}
+
+Since the need for recovering data after a catastrophic failure such as a hardware
+malfunction is not new there are a number of existing solutions to this problem.
+
+\paragraph{rsync} A possible way of implementing such a solution is based on the
+rsync tool which allows copying directories while replacing files existing in
+other directories with hard links to them~\cite[argument `--link-dest']{rsync}.
+This in turn allows saving storage space when performing periodic backups and a
+backup contains unchanged files which are already contained in a previous backup.
+The operating system ensures that when deleting a backup the files being referenced
+by hard links from other backups are not actually deleted but remain accessible.
+
+Examples of this approach are Back In Time~\cite{backintime} and rsnapshot~\cite{rsnapshot}.
+
+\paragraph{Full/incremental backups} Another approach consists of periodically performing
+backups without any data deduplication, called `full' backups.
+Backups happening between them are stored as changes which happened since the last backup,
+being called `incremental' backups as a result~\cite[section `OPERATION AND DATA FORMATS']{Duplicity}.
+
+This allows to apply transformations such as encryption and compression to the generated
+backups~\cite[section `DESCRIPTION']{Duplicity}, which are not possible when performing
+backups based purely on rsync since it was originally designed to be
+`a fast, versatile, remote (and local) file-copying tool'~\cite{rsync}.
+Another advantage is the ability to detect and store differences between files of different
+backups, allowing for storage space savings where rsync would require creating a new
+file containing only slight differences from a previous backup~\cite[section `OPERATION AND DATA FORMATS']{Duplicity}.
+
+A drawback of this approach is the need to apply all incremental backups performed since
+the last full backup to it when restoring a single backup~\cite[section `OPERATION AND DATA FORMATS']{Duplicity},
+requiring users to balance the time required for backup restoration with the processing
+and storage costs associated with creating and keeping periodic full backups.
+It also requires keeping backups which are no longer of interest to allow for
+incremental backups based on them to be restored.
+
+Examples of this approach are Déjà Dup~\cite{DejaDup} and Duplicity~\cite{Duplicity} on which it is based.
+
+\paragraph{Content-addressable storage} An alternative to full/incremental backups which
+still allows applying transformations to the generated backups while avoiding the mentioned
+problems of backups depending on each other consists of splitting the data to be backed up into chunks.
+These chunks are stored in a key-value store based on a key derived from their
+content, allowing different backups which share common data to save storage space
+by referencing the chunks containing this data multiple times~\cite[section `Internals']{Borg1}.
+When restoring backups the chunks containing its data are retrieved from the key-value store
+and the splitting operation is reversed, thereby avoiding the need to access other backups.
+
+The use of a shared key-value store also enables backups to be performed in parallel
+while allowing deduplication of data between them, which is not possible when using
+Duplicity~\cite[question 284867]{DuplicityLaunchpad} but also dependent on the
+implementation used.
+An example of this is Borg 1 requiring exclusive access~\cite[section `Frequently asked questions']{Borg1}
+while Borg 2~\cite[section `Important notes 2.x']{Borg2} and restic~\cite[Issue 4321]{resticGit}
+allow multiple backups to the same key-value store to be performed in parallel.
+
+A drawback of this approach is that when a backup is deleted its chunks remain in the
+key-value store, continuing to occupy storage space even if not referenced by any remaining backups.
+To reclaim the storage space used by such chunks an operation has to be run periodically which
+calculates the chunks still referenced and deletes the rest~\cite[section `Usage']{Borg1}.
+The cost of performing this operation is increased by many implementations such as
+Borg 1~\cite[section `Frequently asked questions']{Borg1},
+Borg 2~\cite[section `Important notes 2.x']{Borg2} and
+Restic~\cite[section `Removing backup snapshots']{restic} requiring exclusive access
+to the key-value store for its duration, preventing backup creation or restoration.
+
+Another problem is the need to balance the amount of created chunks with the
+efficiency of deduplication.
+Increasing the number of chunks by reducing their individual sizes also increases
+the resources required to manage them while simultaneously allowing for a more
+fine-grained deduplication~\cite[section `Additional Notes']{Borg1}.
+To reduce the impact of the number of chunks on performance some programs
+like Borg 1~\cite[section `Internals']{Borg1} and restic~\cite[section `Terminology']{restic}
+combine multiple chunks when storing them, for example as a single file in the file system.
+
+Examples of this approach are Pika Backup~\cite{Pika} and Borg 1~\cite{Borg1} on which it is based,
+Borg 2~\cite{Borg2}, restic~\cite{restic}, Duplicacy~\cite{Duplicacy}, Duplicati~\cite{Duplicati}
+and Kopia~\cite{Kopia}.
+
+\paragraph{Other} Besides the aforementioned solutions there are a number of alternatives
+like Bacula~\cite{Bacula} which for the purpose of clarity will not be further investigated.
+
+\section{Lock-Free Deduplication}
+
+\subsection{Duplicacy}
+
+In their 2020 paper~\cite{Duplicacy} Gilbert Chen et al.\ proposed a solution to
+the problem of periodic chunk deletion operations requiring exclusive access when
+using a shared content-addressable storage for backup operations.
+Their solution consists of a new backup program called `Duplicacy' which, while
+using the aforementioned content-addressable storage approach, allows backup
+and chunk deletion operations to run in parallel without relying on exclusive
+access to the key-value store to ensure data consistency.
+
+Duplicacy allows performing the creation of chunks either by using a fixed chunk size
+or are more flexible approach called
+`variable-size chunking'~\cite[section `Incremental Backup and Full Snapshot']{Duplicacy}.
+While using a fixed chunk size has a smaller computational overhead in comparison
+to the variable-size chunking algorithm it will fail to deduplicate data which was
+moved, for example by inserting data into an existing file.
+Variable-size chunking overcomes this problem by using a rolling hash function at the
+cost of an increased need for computational resources.
+This rolling hash function can be efficiently computed as a sliding window over the data
+and is used to identify boundaries between chunks, allowing them to be recognized
+after a move~\cite[section `Chunking']{Duplicacy}.
+
+While Duplicacy does not combine chunks it uses a different technique to reduce the
+number of objects stored.
+When creating a backup consisting of multiple files they are first sorted and
+combined into a single data stream, an approach similar to the well-known
+`tar' archival program.
+The resulting stream is then split into chunks, making the number of chunks
+only dependent on the amount of data~\cite[section `Naming Chunks']{Duplicacy}
+while some other programs such as Borg 1 create at least as many chunks as files
+present in the backup~\cite[section `Internals']{Borg1}.
+
+Besides these features Duplicacy allows applying compression and encryption to
+the generated backups~\cite[section `Compression and Encryption']{Duplicacy},
+which will not be in the focus of this thesis.
+
+\subsection{Algorithm}
+
+To avoid the need for exclusive access Duplicacy uses an algorithm called
+`Lock-Free Deduplication' which operates on a central key-value store,
+called the `(file) storage' in their paper but referred to as the `\textit{repository}'
+throughout this thesis to better align with the terminology used in
+programs such as Borg~\cite[section `Internals']{Borg1, Borg2} and
+restic~\cite[section `Terminology']{restic}.
+The repository stores chunks as separate objects with a name based on their
+individual contents, avoiding the need for a central database to track which
+objects contain which chunks and the associated problems of parallel
+access~\cite[section `Naming Chunks Based Backup']{Duplicacy}.
+
+It is used by multiple actors which can perform operations such as creating
+and deleting backups on the repository, called `\textit{clients}'.
+To create a backup a client generates chunks as outlined in the previous
+section but when uploading them to the repository follows the following policy:
+
+\begin{samepage}
+    \paragraph{Policy 1} (Checking before Uploading).
+    \textit{
+        Before uploading a new chunk, the backup procedure always performs
+        a lookup with a filename determined only by the chunk content hash.
+    }~\cite{Duplicacy} \\
+\end{samepage}
+
+
+Since this will identify existing chunks even when created by other clients
+their backups will share identical
+chunks+\cite[section `Naming Chunks Based Backup']{Duplicacy}.
+The backup itself consists of a `\textit{manifest file}' which contains the
+necessary metadata to restore it with the chunks uploaded to the repository.
+While this manifest file does not store the data of the backup directly it
+can still reach a large size should many chunks be referenced.
+To reduce the storage space it occupies it is also split into chunks and
+stored in the repository, reducing the number of chunks directly referenced
+by it~\cite[section `Naming Chunks']{Duplicacy}.
+\Cref{fig:repository-structure} shows the resulting schematic structure with
+chunks produced by backup data in green and the ones produced by manifest files
+in red.
+
+\begin{figure}
+    \includesvg[width=0.75\textwidth, pretex=\small]{repository_structure.drawio.svg}
+    \caption{Schematic structure of a repository.}\label{fig:repository-structure}
+\end{figure}
+
+While the paper does allow replacing chunks to allow for a lock-free backup
+operation~\cite[Theorem 1]{Duplicacy} it does not state whether this is the case
+for manifest files, but upon request this turned out to be not the
+case~\cite[topic `Duplicacy paper data loss ']{Duplicacy-Forum}.
+
+When deleting a backup by simply deleting chunks which would become unreferenced
+there is the possibility of a chunk being deleted while another client creates a
+manifest file referencing it, causing the restoration of the associated backup to
+fail.
+To prevent this instead of deleting them such chunks are first turned into `\textit{fossils}'
+by renaming them, allowing them to be referenced by the following policy:
+
+\begin{samepage}
+    \paragraph{Policy 2}\label{para:policy2} (Fossil Accessing).
+    \textit{The following two rules present the access policy for fossils.}
+    \begin{enumerate}
+        \item \textit{
+            A restore, list or check procedure that reads existing backups can
+            read the fossil if the original chunk cannot be found.
+        }
+        \item \textit{
+            A backup procedure cannot access any fossils. That is, it must upload
+            a chunk if it cannot find the chunk, even if a corresponding fossil exists.
+        }
+    \end{enumerate}~\cite{Duplicacy} \\
+\end{samepage}
+
+This step is called the `\textit{fossil collection step}' and consists of downloading
+all existing manifest files from the repository, using them and a list of manifest files
+of backups to be deleted to calculate the set of unreferenced chunks and turn them into
+fossils~\cite[section `Two Step Fossil Deletion']{Duplicacy}.
+
+The actual deletion of the created fossils is performed by the `\textit{fossil deletion step}',
+which will be delayed until the fossils will no longer be referenced by any manifest files
+which are in the process of being created as by the following policy:
+
+\begin{samepage}
+    \paragraph{Policy 3}\label{para:policy3} (Fossil Deleting).
+    \textit{The following two conditions should be met before deleting fossils permanently.}
+    \begin{enumerate}
+        \item \textit{
+            For each backup client, there is a new backup that was not seen by
+            the fossil collection step.
+        }
+        \item \textit{
+            For each backup client, the new backup must have finished after
+            the fossil collection step.
+        }
+    \end{enumerate}~\cite{Duplicacy} \\
+\end{samepage}
+
+Should these two conditions be met downloading all manifest files existing in the
+repository will find any manifest files which may still reference the fossils.
+Should a fossil be referenced it is turned back into a chunk (called `\textit{fossil recovery}'),
+otherwise it is permanently deleted.
+The data required for these operations is taken from a `\textit{fossil collection file}'
+which was created by the fossil collection step and stored outside the repository
+locally by the client performing these operations~\cite[section `Two Step Fossil Deletion']{Duplicacy}. 
+
+\subsection{Race condition}\label{sec:race-condition}
+
+While the paper claims that the aforementioned algorithm is lock-free~\cite[Theorem 2]{Duplicacy}
+there is actually a possibility of data-loss when multiple clients perform the fossil
+collection and deletion steps at the same time, as shown in \Cref{fig:race-candition}.
+
+\begin{figure}[H]
+    \includesvg[width=0.95\textwidth, pretex=\small]{fossil_race_condition.drawio.svg}
+    \caption{Example of parallel execution causing data loss.}\label{fig:race-candition}
+\end{figure}
+
+In the shown example there exist 3 clients which operate on a central repository.
+It begins with a client creating a backup called `\#1', which consists of uploading
+a new chunk and a manifest file referencing it.
+After that another client performs the fossil collection step required to delete
+this backup, which deletes its manifest file and turns the new chunk into a fossil.
+Next, every client creates a backup with its associated manifest file to allow the
+fossil deletion step to proceed under \nameref{para:policy3}.
+
+However, before it is executed, another client performs the fossil collection step
+required to delete on of these backups, called `\#2'.
+Should it have included re-uploading the same chunk which was turned into a fossil
+earlier the fossil collection step will turn it into a fossil should none of
+the other manifests reference it.
+Since \nameref{para:policy2} implies that there can only exist at most one fossil per chunk
+name the renaming operation will replace the existing fossil.
+
+This creates a dangerous situation where multiple fossil collections contain the same
+fossil but have different timestamps associated with them when checking \nameref{para:policy3}.
+Should the fossil deletion step be executed it can't distinguish between fossils created
+by its fossil collection step and fossils of the same chunks created by different fossil
+collection steps.
+This in turn can cause it to delete them even before \nameref{para:policy3} should allow the
+fossil deletion step associated with the fossil collection step that created to be executed,
+violating the assumption that the fossil will no longer be referenced by manifest files
+which are in the process of being created.
+
+In the example this is exploited by a client creating a manifest file called `\#3` referencing
+the chunk which was turned into a fossil but looked up before and therefore not re-uploaded
+again.
+Should this manifest file be created after the fossil deletion step downloaded all manifest
+files it will delete the fossil and therefore cause restoration of the associated backup to fail.
+
+\subsection{Solution}
+
+To prevent the race condition explained in \Cref{sec:race-condition} the parallel execution
+of the fossil collection and deletion steps has to be constrained.
+
+\begin{samepage}
+    \begin{thm}\label{thm:singleclient}
+        Assuming the manifest files of backups to be deleted are removed during the
+        fossil collection step.
+        By limiting fossil collection and deletion steps to a single client and the
+        number of pending fossil deletion steps to 1 fossil collection and deletion
+        steps influencing each other does not disrupt the Lock-Free Deduplication algorithm.
+    \end{thm}
+\end{samepage}
+
+\paragraph{Proof} The following interactions are possible:
+\begin{enumerate}
+    \item A fossil collection step reverts a fossil recovery by turning the chunk back into a fossil
+
+        Should it revert a fossil recovery the fossil was once determined to be
+        referenced by a fossil deletion step and should therefore only be fossilized
+        after the referencing manifest files seen by the fossil deletion step where
+        either removed or are about to be deleted by the fossil collection step.
+        Since the fossil deletion step completed before the fossil collection step
+        started any remaining manifest files seen by it are also seen by the fossil
+        collection step.
+
+    \item A fossil collection step creates a fossil operated on by a fossil deletion step
+
+        Should it create a fossil on which a fossil deletion step operates the
+        fossil deletion step may recover or delete the fossil which will be proven
+        not to disrupt the Lock-Free Deduplication algorithm by case 3 and 4.
+
+    \item A fossil deletion step recovers a fossil
+
+        Should the fossil deletion step recover a fossil it was once thought to be
+        unreferenced and should therefore only be recovered if it is referenced again.
+        Since a fossil deletion step prevents fossil collections steps from deleting
+        manifest files during its execution a seen manifest file will still exist at
+        the time the fossil is recovered.
+
+    \item A fossil deletion step deletes a fossil
+
+        Should the fossil deletion step delete a fossil it should only do so when
+        there is no manifest file still referencing it.
+        The fossil deletion step can only receive fossils from its fossil
+        collection step or one which was executed before it and can only start after
+        \nameref{para:policy3} ensures no new manifest files can reference fossils
+        created before its fossil collection step ended.
+        Since there can be at most one pending fossil deletion step the fossil
+        deletion step can only see fossils created by fossil collection steps
+        which completed before its associated fossil collection step and therefore
+        any manifest file still referencing the fossil will be seen by the
+        fossil deletion step.
+
+    \item A fossil deletion step creates a chunk operated on by a fossil collection step
+
+        Should a fossil deletion step recover a fossil into a chunk on which a
+        fossil collection step operates the fossil collection may revert it which
+        was proven not to disrupt the Lock-Free Deduplication algorithm by case 1.
+\end{enumerate}
+
+While \Cref{thm:singleclient} might seem like a regression to requiring exclusive access to
+the repository during the fossil collection and deletion steps it only applies to these operations.
+Since the Lock-Free Deduplication algorithm still guards against clients creating backups
+in parallel they can continue to do so while one of them performs the fossil collection
+or deletion step.
+It seems that these constraints are acceptable for most use cases since Duplicacy
+itself~\cite[page `prune']{Duplicacy-Wiki} uses a similar approach, but whether this race
+condition is known to them or it is done because
+`This can greatly simplify the implementation'~\cite[topic `Prune command details']{Duplicacy-Forum}
+could not be determined.
