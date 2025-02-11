@@ -10,3 +10,4 @@ restic
 Duplicati
 Kopia
 Bacula
+atomicity
