@@ -116,7 +116,7 @@ by the enumeration operation \nameref{para:policy3} may allow the client perform
 the fossil deletion step to continue.
 Since \nameref{para:policy3} only ensures that new manifest files created by the
 clients can not reference any existing fossils the client has to take all existing
-manifest files which where not seen by the fossil collection step into account when
+manifest files which were not seen by the fossil collection step into account when
 determining whether a fossil should be recovered or deleted.
 Since the creation of the first manifest file may not be reflected by the directory
 enumeration operation this requirement is violated.
@@ -132,7 +132,7 @@ operation after \nameref{para:policy3} is satisfied.
 Proceeding only after \nameref{para:policy3} is satisfied ensures that manifest
 files created after the first enumeration operation completed can not reference
 any existing fossils.
-This in turn ensures that all manifest files which still reference them where
+This in turn ensures that all manifest files which still reference them were
 created before the execution of the second enumeration operation and are therefore
 reflected by its result.
 
@@ -248,7 +248,7 @@ or at a longer interval than the regular fossil collection steps, which is
 similar to the recommendations for the solution used by Duplicacy suffering
 from the same problem~\cite[topic `Prune command details']{Duplicacy-Forum}.
 
-\subsection{Handling abandoned fossils}
+\subsection{Handling abandoned fossils}\label{sec:abandoned-fossils}
 
 Since abandoned fossils existing within the repository have no associated fossil
 collection the timestamp for validating \nameref{para:policy3} can not be determined.
@@ -272,3 +272,128 @@ exist in the repository.
 To prevent the fossil deletion step from interfering with the proof of 
 \Cref{thm:nonatomic-access} by recovering a fossil multiple times the list
 of fossils recorded by the fossil collection has to be deduplicated.
+
+\section{Managing Clients}
+
+The ability of clients to create backups in parallel combined with the cross-client
+deduplication of \nameref{para:policy1} makes using as many of them as possible
+with a single repository advantageous.
+At the same time new sources of backups can be identified after setting up a repository,
+for example by new machines or services being put into operation.
+Making existing clients perform these backups allows for less parallel execution
+in comparison to assigning them to new clients and can be problematic should the
+data to be backed up be stored on a different machine.
+
+It is also possible for existing clients to stop periodically creating backups,
+for example when the machine running the client is taken out of service or its
+data is no longer important enough to be backed up.
+In this case after some time fossil deletion steps can no longer be performed since
+\nameref{para:policy3} prevents them from proceeding until every client has created
+a new manifest file after their associated fossil collection step completed.
+While Duplicacy solves this problem by excluding clients which have not created a backup
+for 7 days this approach allows for data loss to occur when creating a backup takes
+longer than this time period~\cite[topic `Prune command details']{Duplicacy-Forum}.
+
+Both of those problems could be solved by allowing clients to be added or removed
+from the repository.
+This section investigates which conditions have to be upheld to not disrupt
+the Lock-Free Deduplication algorithm.
+
+\subsection{Adding Clients}
+
+\begin{lem}\label{lem:adding-client-future}
+    Adding a client to the repository will not disrupt future fossil collection
+    steps and their associated fossil deletion steps.
+\end{lem}
+
+\paragraph{Proof} Adding a client will cause future fossil collection and deletion
+steps to treat him the same as the existing clients, behaving as if the client was
+part of the set of existing clients when the repository was created.
+
+\begin{lem}\label{lem:adding-client-collection}
+    Adding a client to the repository will not disrupt fossil collection steps
+    which were running at the time of his addition.
+\end{lem}
+
+\paragraph{Proof} The only way a new client can interact with a running fossil
+collection step is by creating a new manifest file.
+
+Should the fossil collection step see the new manifest file it will treat it
+the same as the manifest files created by existing clients, behaving as if the
+client was part of the set of existing clients when the repository was created.
+
+Should it not see the new manifest file it will still behave the same as if the
+client was part of the set of existing clients when the repository was created
+with the client not having created a single manifest file yet.
+
+\begin{lem}\label{lem:adding-client-deletion}
+    Adding a client to the repository will not disrupt fossil deletion steps
+    which were running at the time of his addition or after it.
+\end{lem}
+
+\paragraph{Proof} Performing the fossil deletion step requires downloading a list
+of all existing clients from the repository to check whether \nameref{para:policy3}
+is satisfied~\cite[Algorithm 2]{Duplicacy}.
+In addition to creating manifests a new client can interact with a fossil deletion
+step by it being contained in this list.
+
+Should the client be added to the repository before the list of existing clients
+is downloaded it will be treated the same as the existing clients with it possibly
+not having created a manifest file yet.
+
+Should the client be added to the repository after the list of existing clients
+is downloaded it will be ignored by the check of \nameref{para:policy3}.
+Should this be the case any fossils operated on by the fossil deletion step will
+already exist in the repository since a fossil deletions step implementing
+\Cref{thm:singleclient} will only access fossils created before its associated
+fossil collection step finished.
+Since the new manifest files can not reference the existing fossils because of
+\nameref{para:policy2} the fossil deletion step does not have to be delayed until
+their creation to correctly determine whether a fossil has to be recovered.
+
+\begin{thm}\label{thm:adding-clients}
+    Expanding the list of existing clients does not disrupt the Lock-Free
+    Deduplication algorithm.
+\end{thm}
+
+\paragraph{Proof} The following situations are possible:
+
+\begin{enumerate}
+    \item A client is added to the repository before a fossil collection step,
+        which will not disrupt the Lock-Free Deduplication algorithm as proven
+        by \Cref{lem:adding-client-future}.
+
+    \item A client is added to the repository during a fossil collection step,
+        which will not disrupt the Lock-Free Deduplication algorithm as proven
+        by \Cref{lem:adding-client-collection}.
+
+    \item A client is added to the repository before or during a fossil deletion
+        step, which will not disrupt the Lock-Free Deduplication algorithm as
+        proven by \Cref{lem:adding-client-deletion}.
+\end{enumerate}
+
+In all cases adding a client to the repository will not disrupt the Lock-Free
+Deduplication algorithm.
+
+\subsection{Removing Clients}
+
+\begin{thm}\label{thm:removing-clients}
+    Assuming a client will finish all running operations before being removed.
+    Removing him from the list of clients existing in the repository does not
+    disrupt the Lock-Free Deduplication algorithm beyond the possibility of
+    abandoning any fossil collections created by it.
+\end{thm}
+
+\paragraph{Proof} Removing a client from the repository only influences future
+validations of \nameref{para:policy3}, causing it to behave as if the client
+never existed.
+Should this be the case all manifest files created by the client were created
+before it was removed from the repository and are therefore visible to the
+fossil deletion step.
+Since the set of all manifest files of a client contains the set of manifest
+files referencing fossils this provides the same guarantee as \nameref{para:policy3}
+had the client not been removed from the repository.
+
+Should the client have performed a fossil collection step without performing the
+associated fossil deletion step before removal the fossils created by it will be
+abandoned and can be removed by the method described in \Cref{sec:abandoned-fossils}.

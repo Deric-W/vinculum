@@ -141,7 +141,7 @@ To create a backup a client generates chunks as outlined in the previous
 section but when uploading them to the repository follows the following policy:
 
 \begin{samepage}
-    \paragraph{Policy 1} (Checking before Uploading).
+    \paragraph{Policy 1}\label{para:policy1} (Checking before Uploading).
     \textit{
         Before uploading a new chunk, the backup procedure always performs
         a lookup with a filename determined only by the chunk content hash.
@@ -291,7 +291,7 @@ of the fossil collection and deletion steps has to be constrained.
 
         Should it revert a fossil recovery the fossil was once determined to be
         referenced by a fossil deletion step and should therefore only be fossilized
-        after the referencing manifest files seen by the fossil deletion step where
+        after the referencing manifest files seen by the fossil deletion step were
         either removed or are about to be deleted by the fossil collection step.
         Since the fossil deletion step completed before the fossil collection step
         started any remaining manifest files seen by it are also seen by the fossil
