@@ -10,21 +10,23 @@ the operations clients perform on the repository it must be assumed they are ato
 This section will examine the feasibility of these assumptions when using a POSIX~\cite{Posix}
 file system.
 
-\subsection{Creating chunks}
+\subsection{Creating chunks and manifest files}
 
 When creating chunks multiple clients may create the same chunk at the same time.
 To deal with this situation the repository must resolve the arising copies by
 keeping on of them~\cite[Theorem 1]{Duplicacy}.
-Furthermore, other clients may access a chunk while it is in the process of being
-created, which could result in a partial and therefore invalid chunk being read.
+Furthermore, other clients may access a chunk or manifest file while it is in the
+process of being created, which could result in partial and therefore invalid
+data being read.
 
 Based on the structure of the repository described in \cite[section `Naming Chunks']{Duplicacy}
-it can be assumed that the chunks exist as individual files.
-To prevent clients from accessing invalid chunks they can be first created in a
-different directory from the one containing the valid chunks existing on the same file system.
-When the client has finished creating the chunk it can use the `rename'~\cite{Posix}
-function available on all POSIX conforming systems to atomically move the chunk
-to the other directory.
+it can be assumed that the chunks and manifest files exist as individual files.
+To prevent clients from accessing invalid chunks and manifest files they can be first
+created in different directories from the ones containing the valid chunks and manifest
+files existing on the same file system.
+When a client has finished writing a file it can use the `rename'~\cite{Posix}
+function available on all POSIX conforming systems to atomically move it to the
+other directories.
 Another benefit of this approach is that any existing chunks are replaced,
 resolving any arising copies by freeing their occupied storage space once any
 processes having the file open during the replacement have closed
@@ -185,3 +187,88 @@ delete the file in the meantime~\cite{Posix}.
 Since the renaming and deletion operations do not interfere with already opened
 files~\cite[section `DESCRIPTION' of the functions `unlink' and `rename']{Posix}
 this situation requires no further mitigations.
+
+\section{Error Recovery}
+
+Under real world conditions the algorithm presented in \Cref{sec:algorithm}
+may fail at any time, for example in case of a client experiencing a power failure.
+This section describes methods to recover from such events.
+
+\subsection{Effects of failure}
+
+The set of operations which modify the repository consists of backup creation
+and the fossil collection and deletion steps.
+
+Should a client creating a backup be interrupted it might have already uploaded
+some chunks to the repository without creating a manifest file.
+Should no client create a manifest file referencing these chunks they will be
+invisible to the fossil collection step and therefore remain in the repository
+indefinitely.
+
+Similarly, a fossil collection step failing or an existing fossil collection being abandoned
+(for example by the client storing it failing to successfully perform the fossil deletion step)
+would cause created fossils to remain in the repository.
+Should another fossil collection step not try to turn their associated chunks into
+fossils again and subsequently remove them during the fossil deletion step they will also
+remain in the repository indefinitely.
+
+\subsection{Handling unreferenced chunks}
+
+The unreferenced chunks created by an interrupted backup creation operation can
+not simply be deleted because of the possibility of clients creating backups in
+parallel and therefore have to be made visible to a fossil collection step.
+
+\begin{thm}\label{thm:unreferenced-chunks}
+    Assuming there is a way of enumerating all chunks existing in a repository.
+    It is possible to handle unreferenced chunks using the fossil collection and
+    deletion steps without disrupting the Lock-Free Deduplication algorithm.
+\end{thm}
+
+\paragraph{Proof} Assuming a manifest file referencing all chunks existing in
+the repository was created, passing it to the fossil collection step to be deleted
+would cause all chunks not referenced by other manifest files to be deleted by the
+associated fossil deletion step.
+
+Instead of creating this manifest file the client performing the fossil collection
+step can just pretend it already exists and use the set of chunks existing within
+the repository as the chunks referenced by it when performing the fossil collection
+step, not deleting it afterwards.
+Since \Cref{thm:singleclient} prevents other fossil collection and deletion steps
+from running in parallel there is no difference between this imaginary manifest file
+being deleted by the fossil collection step or it never existing in the first place. \\
+
+A drawback of this solution is that chunks created by backup creation operations
+running in parallel will be detected as being unreferenced and therefore turned
+into fossils.
+While the fossil deletion step will turn them back into chunks the increased
+number of renaming operations makes fossil collection steps of this kind more
+expensive in comparison to regular fossil collection steps.
+A solution to this problem is to only perform the expensive variant on demand
+or at a longer interval than the regular fossil collection steps, which is
+similar to the recommendations for the solution used by Duplicacy suffering
+from the same problem~\cite[topic `Prune command details']{Duplicacy-Forum}.
+
+\subsection{Handling abandoned fossils}
+
+Since abandoned fossils existing within the repository have no associated fossil
+collection the timestamp for validating \nameref{para:policy3} can not be determined.
+
+\begin{thm}\label{thm:abandoned-fossils}
+    Assuming there is a way of enumerating all fossils existing in a repository.
+    It is possible to handle abandoned fossils using the fossil collection and
+    deletion steps without disrupting the Lock-Free Deduplication algorithm.
+\end{thm}
+
+\paragraph{Proof} A possible solution would be to extend the list of created
+fossils recorded by a fossil collection with the fossils already existing in
+the repository.
+Since they already existed in the repository at the time of the fossil collection
+step its associated fossil deletion step will only operate on fossils created
+before its fossil collection step completed, which was proven not to disrupt the
+Lock-Free Deduplication algorithm by the proof of \Cref{thm:singleclient}.
+The fossil deletion step will either recover or delete them, making them no longer
+exist in the repository.
+
+To prevent the fossil deletion step from interfering with the proof of 
+\Cref{thm:nonatomic-access} by recovering a fossil multiple times the list
+of fossils recorded by the fossil collection has to be deduplicated.
