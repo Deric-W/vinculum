@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::pin::{pin, Pin};
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver};
-use vinculum::{FossilCollection, FossilCollectionBuilder, Manifest, Repository};
+use vinculum::{FossilCollection, Manifest, Repository, RepositoryExt};
 use vinculum_benchmark::repository::{initialize, FileRepository};
 use vinculum_benchmark::{load_collection, ChunkID, ID};
 
@@ -296,33 +296,8 @@ where
     M: IntoIterator<Item = ID>,
 {
     let pruned_manifests: std::collections::HashSet<ID> = manifests.into_iter().collect();
-    let mut builder = FossilCollectionBuilder::new();
-    let cell = RefCell::new(&mut builder);
-    let current_manifests = pin!(repository.manifests().await.unwrap());
-    current_manifests
-        .try_for_each_concurrent(parallelism, |id| async {
-            if !pruned_manifests.contains(&id) {
-                let _ = download_manifest_chunks(repository, &id, |chunk| {
-                    cell.borrow_mut().add_referenced_chunk(chunk)
-                })
-                .await;
-                cell.borrow_mut().add_seen_manifest(id);
-            }
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let pruned_stream = pin!(iter(pruned_manifests.iter()));
-    pruned_stream
-        .for_each_concurrent(parallelism, |id| async {
-            let _ = download_manifest_chunks(repository, id, |chunk| {
-                cell.borrow_mut().add_fossil_candidate(chunk);
-            })
-            .await;
-        })
-        .await;
-    let collection = builder
-        .collect_fossils(repository, parallelism)
+    let collection = repository
+        .collect_manifests(&pruned_manifests, parallelism)
         .await
         .unwrap();
     remove_manifests(repository, parallelism, pruned_manifests.iter()).await;

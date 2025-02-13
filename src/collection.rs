@@ -200,7 +200,7 @@ impl<M, C> FossilCollectionBuilder<M, C> {
         concurrency: impl Into<Option<usize>>,
     ) -> Result<FossilCollection<M, C>, FossilCollectionError<M, C, R::Error>>
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ChunkID = C>,
     {
         if let Err(e) = self
@@ -225,7 +225,7 @@ impl<M, C> FossilCollectionBuilder<M, C> {
         concurrency: Option<usize>,
     ) -> Result<(), R::Error>
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ChunkID = C>,
     {
         let fossil_stream = futures::stream::iter(self.iter_fossil_candidates().map(Ok));
@@ -291,7 +291,7 @@ where
     /// and [`Repository::recover_fossil`] this method should be used sparingly.
     pub async fn consider_all_chunks<R>(&mut self, repository: &R) -> Result<(), R::Error>
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ChunkID = C>,
     {
         let mut chunk_stream = pin!(repository.chunks().await?);
@@ -317,7 +317,7 @@ where
         concurrency: impl Into<Option<usize>>,
     ) -> Result<FossilCollection<M, C>, FossilCollectionError<M, C, R::Error>>
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ChunkID = C>,
     {
         let mut fossil_stream = match repository.fossils().await {

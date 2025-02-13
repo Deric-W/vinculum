@@ -71,16 +71,19 @@ pub use collection::{
 };
 pub use deletion::FossilDeletionError;
 use deletion::{FossilDeleter, SimpleFossilDeleter};
-use futures::stream::Stream;
+use futures::stream::{iter, Stream, StreamExt, TryStreamExt};
 pub use pipelined::{
     PipelinedFossilCollectionBuilder, PipelinedFossilDeletionError, PipelinedSeenManifests,
 };
 use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::future::Future;
 use std::hash::Hash;
 use std::iter::{ExactSizeIterator, FusedIterator, Iterator};
+use std::pin::pin;
 use std::time::SystemTime;
+use thiserror::Error;
 
 /// A repository storing clients, chunks and manifests.
 pub trait Repository {
@@ -195,6 +198,223 @@ pub trait Repository {
         &self,
         fossil: &<Self::Manifest as Manifest>::ChunkID,
     ) -> impl Future<Output = Result<(), Self::Error>>;
+}
+
+/// Error produced by methods of [`RepositoryExt`] which may fail before
+/// collecting fossils.
+#[derive(Error, Debug)]
+pub enum FallibleFossilCollectionError<R, M, E> {
+    /// A repository operation failed.
+    #[error("repository operation failed with {0}")]
+    RepositoryError(#[source] R),
+    /// A manifest reading operation failed.
+    #[error("manifest reading operation failed with {0}")]
+    ManifestError(#[source] M),
+    /// Collecting the fossils failed.
+    ///
+    /// Since this usually produces a [`FossilCollectionError`]
+    /// the operation may be retried.
+    #[error("collecting fossils failed with {0}")]
+    CollectionError(#[source] E),
+}
+
+/// Shortscuts for using [`FossilCollectionBuilder`].
+pub trait RepositoryExt: Repository {
+    /// Collect chunks of a set of manifest in preparation of their deletion.
+    ///
+    /// This is a shortcut for feeding the chunks of all other manifests to
+    /// [`FossilCollectionBuilder::add_referenced_chunk`] while feeding the
+    /// chunks of the passed manifests to [`FossilCollectionBuilder::add_fossil_candidate`]
+    /// followed by calling [`FossilCollectionBuilder::collect_fossils`].
+    #[allow(clippy::type_complexity)]
+    fn collect_manifests<S>(
+        &self,
+        manifests: S,
+        concurrency: impl Into<Option<usize>>,
+    ) -> impl Future<
+        Output = Result<
+            FossilCollection<Self::ManifestID, <Self::Manifest as Manifest>::ChunkID>,
+            FallibleFossilCollectionError<
+                Self::Error,
+                <Self::Manifest as Manifest>::Error,
+                FossilCollectionError<
+                    Self::ManifestID,
+                    <Self::Manifest as Manifest>::ChunkID,
+                    Self::Error,
+                >,
+            >,
+        >,
+    >
+    where
+        S: IntoIterator,
+        S::Item: Borrow<Self::ManifestID> + Eq + Hash;
+
+    /// Perform an extensive fossil collection, additionally removing unreferenced
+    /// chunks and existing fossils from the repository.
+    ///
+    /// This combines [`RepositoryExt::collect_manifests`] with [`FossilCollectionBuilder::consider_all_chunks`]
+    /// and [`FossilCollectionBuilder::collect_all_fossils`].
+    #[allow(clippy::type_complexity)]
+    fn extensive_collection<S>(
+        &self,
+        manifests: S,
+        concurrency: impl Into<Option<usize>>,
+    ) -> impl Future<
+        Output = Result<
+            FossilCollection<Self::ManifestID, <Self::Manifest as Manifest>::ChunkID>,
+            FallibleFossilCollectionError<
+                Self::Error,
+                <Self::Manifest as Manifest>::Error,
+                FossilCollectionError<
+                    Self::ManifestID,
+                    <Self::Manifest as Manifest>::ChunkID,
+                    Self::Error,
+                >,
+            >,
+        >,
+    >
+    where
+        S: IntoIterator,
+        S::Item: Borrow<Self::ManifestID> + Eq + Hash;
+}
+
+impl<T> RepositoryExt for T
+where
+    T: Repository + ?Sized,
+    T::ManifestID: Eq + Hash,
+    <T::Manifest as Manifest>::ChunkID: Eq + Hash,
+    <T::Manifest as Manifest>::ClientID: Eq + Hash,
+{
+    async fn collect_manifests<S>(
+        &self,
+        manifests: S,
+        concurrency: impl Into<Option<usize>>,
+    ) -> Result<
+        FossilCollection<Self::ManifestID, <Self::Manifest as Manifest>::ChunkID>,
+        FallibleFossilCollectionError<
+            Self::Error,
+            <Self::Manifest as Manifest>::Error,
+            FossilCollectionError<
+                Self::ManifestID,
+                <Self::Manifest as Manifest>::ChunkID,
+                Self::Error,
+            >,
+        >,
+    >
+    where
+        S: IntoIterator,
+        S::Item: Borrow<Self::ManifestID> + Eq + Hash,
+    {
+        let concurrency: Option<usize> = concurrency.into();
+        let pruned_manifests: std::collections::HashSet<S::Item> = manifests.into_iter().collect();
+        let mut builder = FossilCollectionBuilder::new();
+        let cell = &RefCell::new(&mut builder);
+        let current_manifests = pin!(self
+            .manifests()
+            .await
+            .map_err(FallibleFossilCollectionError::RepositoryError)?);
+        current_manifests
+            .map_err(FallibleFossilCollectionError::RepositoryError)
+            .try_for_each_concurrent(concurrency, |id| async {
+                if !pruned_manifests.contains(&id) {
+                    let _ = download_manifest_chunks(self, &id, |chunk| {
+                        cell.borrow_mut().add_referenced_chunk(chunk)
+                    })
+                    .await
+                    .map_err(FallibleFossilCollectionError::ManifestError)?;
+                    cell.borrow_mut().add_seen_manifest(id);
+                }
+                Ok(())
+            })
+            .await?;
+        let pruned_stream = pin!(iter(pruned_manifests.into_iter()));
+        pruned_stream
+            .map(Ok)
+            .try_for_each_concurrent(concurrency, |id| async move {
+                let _ = download_manifest_chunks(self, id.borrow(), |chunk| {
+                    cell.borrow_mut().add_fossil_candidate(chunk);
+                })
+                .await
+                .map_err(FallibleFossilCollectionError::ManifestError)?;
+                Ok(())
+            })
+            .await?;
+        builder
+            .collect_fossils(self, concurrency)
+            .await
+            .map_err(FallibleFossilCollectionError::CollectionError)
+    }
+
+    async fn extensive_collection<S>(
+        &self,
+        manifests: S,
+        concurrency: impl Into<Option<usize>>,
+    ) -> Result<
+        FossilCollection<Self::ManifestID, <Self::Manifest as Manifest>::ChunkID>,
+        FallibleFossilCollectionError<
+            Self::Error,
+            <Self::Manifest as Manifest>::Error,
+            FossilCollectionError<
+                Self::ManifestID,
+                <Self::Manifest as Manifest>::ChunkID,
+                Self::Error,
+            >,
+        >,
+    >
+    where
+        S: IntoIterator,
+        S::Item: Borrow<Self::ManifestID> + Eq + Hash,
+    {
+        let concurrency: Option<usize> = concurrency.into();
+        let pruned_manifests: &std::collections::HashSet<S::Item> =
+            &manifests.into_iter().collect();
+        let mut builder = FossilCollectionBuilder::new();
+        let cell = &RefCell::new(&mut builder);
+        let current_manifests = pin!(self
+            .manifests()
+            .await
+            .map_err(FallibleFossilCollectionError::RepositoryError)?);
+        // skip calling add_seen_manifest since they are ignored anyway
+        current_manifests
+            .map_err(FallibleFossilCollectionError::RepositoryError)
+            .try_for_each_concurrent(concurrency, |id| async move {
+                if !pruned_manifests.contains(&id) {
+                    let _ = download_manifest_chunks(self, &id, |chunk| {
+                        cell.borrow_mut().add_referenced_chunk(chunk)
+                    })
+                    .await
+                    .map_err(FallibleFossilCollectionError::ManifestError)?;
+                }
+                Ok(())
+            })
+            .await?;
+        // skip downloading manifests to be pruned since consider_all_chunks
+        // will add their chunks as fossil candidates anyway
+        builder
+            .consider_all_chunks(self)
+            .await
+            .map_err(FallibleFossilCollectionError::RepositoryError)?;
+        builder
+            .collect_all_fossils(self, concurrency)
+            .await
+            .map_err(FallibleFossilCollectionError::CollectionError)
+    }
+}
+
+async fn download_manifest_chunks<R, F>(
+    repository: &R,
+    id: &R::ManifestID,
+    mut on_chunk: F,
+) -> Result<R::Manifest, <R::Manifest as Manifest>::Error>
+where
+    R: Repository + ?Sized,
+    F: FnMut(<R::Manifest as Manifest>::ChunkID),
+{
+    let mut manifest = repository.manifest(id).await?;
+    while let Some(chunk) = manifest.try_next().await? {
+        on_chunk(chunk);
+    }
+    Ok(manifest)
 }
 
 /// Data uploaded by a client, represented as a set of chunks and metadata.
@@ -434,7 +654,7 @@ impl<M, C> FossilCollection<M, C> {
         concurrency: impl Into<Option<usize>>,
     ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ChunkID = C>,
         R::ManifestID: Hash + Eq,
         <R::Manifest as Manifest>::ClientID: Hash + Eq,

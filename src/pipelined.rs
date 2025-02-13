@@ -323,7 +323,7 @@ where
         >,
     >
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         // do not include manifests of fossil collection or expiring manifests

@@ -60,7 +60,7 @@ where
         concurrency: Option<usize>,
     ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         <Self as FossilDeleter<M, I, C>>::delete(self, repository, concurrency).await
@@ -123,7 +123,7 @@ pub(crate) trait FossilDeleter<M, I, C> {
         concurrency: Option<usize>,
     ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         let cell = RefCell::new(&mut *self);
@@ -147,7 +147,7 @@ pub(crate) trait FossilDeleter<M, I, C> {
         concurrency: Option<usize>,
     ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
     where
-        R: Repository<ManifestID = M>,
+        R: Repository<ManifestID = M> + ?Sized,
         R::Manifest: Manifest<ClientID = I, ChunkID = C>,
     {
         // check Policy 3
@@ -189,7 +189,7 @@ async fn check_manifest<R, D>(
     deleter: &RefCell<&mut D>,
 ) -> Result<(), FossilDeletionError<R::Error, <R::Manifest as Manifest>::Error>>
 where
-    R: Repository,
+    R: Repository + ?Sized,
     D: FossilDeleter<
             R::ManifestID,
             <R::Manifest as Manifest>::ClientID,

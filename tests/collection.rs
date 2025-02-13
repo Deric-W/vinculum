@@ -9,7 +9,7 @@ use utilities::{
     assert_chunks, assert_eq_unordered, assert_fossils, create_chunks, create_manifest,
     create_repository,
 };
-use vinculum::{FossilCollection, FossilCollectionBuilder, Repository};
+use vinculum::{FossilCollection, FossilCollectionBuilder, Repository, RepositoryExt};
 use vinculum_benchmark::{ChunkID, ID};
 
 #[tokio::test]
@@ -41,6 +41,52 @@ async fn create_fossils() {
     assert_fossils(&repository, chunks[5..].iter().cloned()).await;
     assert!(before < fossil_collection.timestamp());
     assert!(fossil_collection.timestamp() < after);
+}
+
+#[tokio::test]
+async fn collect_manifests() {
+    let tmpdir = tempdir().unwrap();
+    let repository = create_repository(tmpdir.path());
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
+    create_chunks(&repository, chunks.as_slice()).await;
+    let manifest0 = ID::new("manifest_0".to_string());
+    create_manifest(&repository, &manifest0, &manifest0, &chunks[..5]).await;
+    let manifest1 = ID::new("manifest_1".to_string());
+    create_manifest(&repository, &manifest1, &manifest1, &chunks[2..7]).await;
+    let fossil_collection = repository.collect_manifests([&manifest0], 1).await.unwrap();
+
+    assert_eq_unordered(fossil_collection.iter_fossils(), chunks[..2].iter());
+    assert_eq_unordered(
+        fossil_collection.iter_seen_manifests(),
+        [&manifest1].into_iter(),
+    );
+    assert_chunks(&repository, chunks[2..].iter().cloned()).await;
+    assert_fossils(&repository, chunks[..2].iter().cloned()).await;
+}
+
+#[tokio::test]
+async fn perform_extensive_collection() {
+    let tmpdir = tempdir().unwrap();
+    let repository = create_repository(tmpdir.path());
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
+    repository.fossilize_chunk(&chunks[9]).await.unwrap();
+    create_chunks(&repository, chunks.as_slice()).await;
+    let manifest0 = ID::new("manifest_0".to_string());
+    create_manifest(&repository, &manifest0, &manifest0, &chunks[..5]).await;
+    let manifest1 = ID::new("manifest_1".to_string());
+    create_manifest(&repository, &manifest1, &manifest1, &chunks[2..7]).await;
+    let fossil_collection = repository
+        .extensive_collection([&manifest0], 1)
+        .await
+        .unwrap();
+
+    assert_eq_unordered(
+        fossil_collection.iter_fossils(),
+        chunks[..2].iter().chain(&chunks[7..]),
+    );
+    assert_eq_unordered(fossil_collection.iter_seen_manifests(), [].into_iter());
+    assert_chunks(&repository, chunks[2..7].iter().cloned()).await;
+    assert_fossils(&repository, chunks[..2].iter().chain(&chunks[7..]).cloned()).await;
 }
 
 #[tokio::test]
