@@ -156,6 +156,31 @@ async fn collect_all_fossils_still_referenced() {
     assert_fossils(&repository, []).await;
 }
 
+#[tokio::test]
+async fn remove_unreferenced_chunks() {
+    let tmpdir = tempdir().unwrap();
+    let repository = create_repository(tmpdir.path());
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
+    create_chunks(&repository, chunks.as_slice()).await;
+    let manifest = ID::new("manifest_0".to_string());
+    create_manifest(&repository, &manifest, &manifest, &chunks[5..]).await;
+    let mut builder = FossilCollectionBuilder::new();
+    for chunk in &chunks[5..] {
+        builder.add_referenced_chunk(chunk.clone());
+    }
+    builder.add_seen_manifest(manifest.clone());
+    builder.consider_all_chunks(&repository).await.unwrap();
+    let fossil_collection = builder.collect_fossils(&repository, 1).await.unwrap();
+
+    assert_eq_unordered(fossil_collection.iter_fossils(), chunks[..5].iter());
+    assert_eq!(fossil_collection.seen_manifests(), 1);
+
+    fossil_collection.delete(&repository, 1).await.unwrap();
+
+    assert_chunks(&repository, chunks[5..].iter().cloned()).await;
+    assert_fossils(&repository, []).await;
+}
+
 #[test]
 fn merge_collections() {
     let fossils: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();

@@ -277,6 +277,30 @@ where
         self.referenced_chunks.contains(id)
     }
 
+    /// Consider all chunks existing in the repository as fossil candidates.
+    ///
+    /// This is a variant of [`FossilCollectionBuilder::add_fossil_candidate`]
+    /// which can be used to remove chunks which are not referenced by any manifest,
+    /// for example chunks which are left behind after creating a manifest was aborted.
+    ///
+    /// While chunks belonging to manifests being created or not passed to
+    /// [`FossilCollectionBuilder::add_referenced_chunk`] for other reasons are
+    /// turned into fossils they are recovered when the created [`FossilCollection`]
+    /// is deleted.
+    /// Since this can cause additional and unnecessary calls to [`Repository::fossilize_chunk`]
+    /// and [`Repository::recover_fossil`] this method should be used sparingly.
+    pub async fn consider_all_chunks<R>(&mut self, repository: &R) -> Result<(), R::Error>
+    where
+        R: Repository<ManifestID = M>,
+        R::Manifest: Manifest<ChunkID = C>,
+    {
+        let mut chunk_stream = pin!(repository.chunks().await?);
+        while let Some(chunk) = chunk_stream.try_next().await? {
+            self.add_fossil_candidate(chunk);
+        }
+        Ok(())
+    }
+
     /// Variant of [`FossilCollectionBuilder::collect_fossils`] which cleans up orphaned fossils.
     ///
     /// Should a fossil collection be abandoned (or a failed fossil collection operation not retried successfully)
