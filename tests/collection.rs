@@ -117,6 +117,45 @@ async fn collect_all_fossils() {
     assert!(fossil_collection.timestamp() < after);
 }
 
+#[tokio::test]
+async fn collect_all_fossils_still_referenced() {
+    let tmpdir = tempdir().unwrap();
+    let repository = create_repository(tmpdir.path());
+    let chunks: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();
+    create_chunks(&repository, chunks.as_slice()).await;
+    for chunk in &chunks[..5] {
+        repository.fossilize_chunk(chunk).await.unwrap();
+    }
+    let referencing_manifest = ID::new("referencing_manifest".to_string());
+    create_manifest(
+        &repository,
+        &referencing_manifest,
+        &referencing_manifest,
+        &chunks[..3],
+    )
+    .await;
+    let manifest = ID::new("manifest_0".to_string());
+    create_manifest(&repository, &manifest, &manifest, &chunks[5..]).await;
+    let mut builder = FossilCollectionBuilder::new();
+    for chunk in &chunks[5..] {
+        builder.add_referenced_chunk(chunk.clone());
+    }
+    builder.add_seen_manifest(manifest.clone());
+    for chunk in &chunks[..3] {
+        builder.add_referenced_chunk(chunk.clone());
+    }
+    builder.add_seen_manifest(referencing_manifest.clone());
+    let fossil_collection = builder.collect_all_fossils(&repository, 1).await.unwrap();
+
+    assert_eq_unordered(fossil_collection.iter_fossils(), chunks[..5].iter());
+    assert_eq!(fossil_collection.seen_manifests(), 0);
+
+    fossil_collection.delete(&repository, 1).await.unwrap();
+
+    assert_chunks(&repository, chunks[5..].iter().chain(&chunks[..3]).cloned()).await;
+    assert_fossils(&repository, []).await;
+}
+
 #[test]
 fn merge_collections() {
     let fossils: Vec<ChunkID> = (0..10).map(|i| ChunkID::new([i; 32])).collect();

@@ -220,7 +220,7 @@ which are in the process of being created as by the following policy:
 \end{samepage}
 
 Should these two conditions be met downloading all manifest files existing in the
-repository will find any manifest files which may still reference the fossils.
+repository will find any new manifest files which may still reference the fossils.
 Should a fossil be referenced it is turned back into a chunk (called `\textit{fossil recovery}'),
 otherwise it is permanently deleted.
 The data required for these operations is taken from a `\textit{fossil collection file}'
@@ -320,10 +320,9 @@ of the fossil collection and deletion steps has to be constrained.
         \nameref{para:policy3} ensures no new manifest files can reference fossils
         created before its fossil collection step ended.
         Since there can be at most one pending fossil deletion step the fossil
-        deletion step can only see fossils created by fossil collection steps
-        which completed before its associated fossil collection step and therefore
-        any manifest file still referencing the fossil will be seen by the
-        fossil deletion step.
+        deletion step can only operate on fossils created by its associated fossil
+        collection step and therefore any manifest file still referencing the fossil
+        will be seen by the fossil deletion step.
 
     \item A fossil deletion step creates a chunk operated on by a fossil collection step
 

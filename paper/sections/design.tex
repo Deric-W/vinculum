@@ -262,13 +262,23 @@ collection the timestamp for validating \nameref{para:policy3} can not be determ
 
 \paragraph{Proof} A possible solution would be to extend the list of created
 fossils recorded by a fossil collection with the fossils already existing in
-the repository.
-Since they already existed in the repository at the time of the fossil collection
-step its associated fossil deletion step will only operate on fossils created
-before its fossil collection step completed, which was proven not to disrupt the
-Lock-Free Deduplication algorithm by the proof of \Cref{thm:singleclient}.
-The fossil deletion step will either recover or delete them, making them no longer
-exist in the repository.
+the repository and providing an empty list of manifest files which were
+already seen to the fossil deletion step.
+
+This will result in the fossil deletion step possibly operating on fossils
+not created by its associated fossil collection step which could interfere
+with the proof of \Cref{thm:singleclient} by the manifest files referencing
+them not being taken into consideration by it.
+To prevent this the empty list of manifest files seen by the fossil collection
+step will cause all existing manifest files to be treated as being new and
+therefore taken into consideration by it.
+Since the fossils which were not created by the fossil collection step existed
+in the repository and were therefore created before it completed \nameref{para:policy3}
+will ensure that they can not be referenced by any manifest files which are in the
+process of being created
+
+The fossil deletion step will either recover or delete the fossils, making them no
+longer exist in the repository.
 
 To prevent the fossil deletion step from interfering with the proof of 
 \Cref{thm:nonatomic-access} by recovering a fossil multiple times the list
@@ -346,8 +356,8 @@ Should the client be added to the repository after the list of existing clients
 is downloaded it will be ignored by the check of \nameref{para:policy3}.
 Should this be the case any fossils operated on by the fossil deletion step will
 already exist in the repository since a fossil deletions step implementing
-\Cref{thm:singleclient} will only access fossils created before its associated
-fossil collection step finished.
+\Cref{thm:singleclient} will only access fossils created by its associated fossil
+collection step.
 Since the new manifest files can not reference the existing fossils because of
 \nameref{para:policy2} the fossil deletion step does not have to be delayed until
 their creation to correctly determine whether a fossil has to be recovered.
