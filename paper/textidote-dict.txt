@@ -11,3 +11,8 @@ Duplicati
 Kopia
 Bacula
 atomicity
+Serde
+FossilCollectionBuilder
+RepositoryExt
+PipelinedFossilCollectionBuilder
+Tokio
