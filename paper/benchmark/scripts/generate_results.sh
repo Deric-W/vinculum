@@ -65,8 +65,8 @@ done
     --chunks-end 1001 \
     --chunks-step 1 \
     --manifests-start 2 \
-    --manifests-end 103 \
-    --manifests-step 20 \
+    --manifests-end 1003 \
+    --manifests-step 100 \
     "$location"
 
 rmdir /tmp/thesis
