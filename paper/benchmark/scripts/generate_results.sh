@@ -83,4 +83,19 @@ done
     --manifests-step 100 \
     "$location"
 
+./scripts/generate_csv.py \
+    --borg1 "$borg1" \
+    --borg2 "$borg2" \
+    -o "results/manifests100constNew.csv" \
+    -a /tmp/thesis \
+    --chunk-size 4096 \
+    --chunks-start 100000 \
+    --chunks-end 100001 \
+    --chunks-step 1 \
+    --chunks-per-manifest 100 \
+    --manifests-start 2 \
+    --manifests-end 1003 \
+    --manifests-step 100 \
+    "$location"
+
 rmdir /tmp/thesis

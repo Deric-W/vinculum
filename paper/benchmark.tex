@@ -225,4 +225,31 @@
             \end{center}
         \end{frame}
     }
+
+    \begin{frame}
+        \frametitle{Results (100 chunks per manifest)}
+        \begin{center}
+            \begin{tikzpicture}
+                \pgfplotsset{
+                    table/col sep=comma,
+                    height=.85\textheight
+                }
+                \begin{axis}[
+                    xlabel=Number of manifests,
+                    ylabel=Runtime in seconds,
+                    width=0.75\textwidth,
+                    legend pos=outer north east
+                ]
+                    \addplot table [x=manifests, y expr=\thisrow{Borg 1 deletion}+\thisrow{Borg 1 compaction}] {benchmark/results/manifests100constNew.csv};
+                    \addlegendentry{Borg 1}
+                    \addplot table [x=manifests, y expr=\thisrow{Borg 2 deletion}+\thisrow{Borg 2 compaction}] {benchmark/results/manifests100constNew.csv};
+                    \addlegendentry{Borg 2}
+                    \addplot table [x=manifests, y expr=\thisrow{Duplicacy collection}+\thisrow{Duplicacy deletion}] {benchmark/results/manifests100constNew.csv};
+                    \addlegendentry{Duplicacy}
+                    \addplot table [x=manifests, y expr=\thisrow{Vinculum collection}+\thisrow{Vinculum deletion}] {benchmark/results/manifests100constNew.csv};
+                    \addlegendentry{Vinculum}
+                \end{axis}
+            \end{tikzpicture}
+        \end{center}
+    \end{frame}
 \end{document}
