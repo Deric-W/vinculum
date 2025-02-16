@@ -11,7 +11,7 @@ the operations clients perform on the repository it must be assumed they are ato
 This section will examine the feasibility of these assumptions when using a POSIX~\cite{Posix}
 file system.
 
-\subsection{Creating chunks and manifest files}
+\subsection{Creating chunks and manifest files}\label{sec:creation}
 
 When creating chunks multiple clients may create the same chunk at the same time.
 To deal with this situation the repository must resolve the arising copies by
@@ -310,7 +310,7 @@ from the repository.
 This section investigates which conditions have to be upheld to not disrupt
 the Lock-Free Deduplication algorithm.
 
-\subsection{Adding Clients}
+\subsection{Adding Clients}\label{sec:adding-clients}
 
 \begin{lem}\label{lem:adding-client-future}
     Adding a client to the repository will not disrupt future fossil collection
@@ -386,7 +386,7 @@ their creation to correctly determine whether a fossil has to be recovered.
 In all cases adding a client to the repository will not disrupt the Lock-Free
 Deduplication algorithm.
 
-\subsection{Removing Clients}
+\subsection{Removing Clients}\label{sec:removing-clients}
 
 \begin{thm}\label{thm:removing-clients}
     Assuming a client will finish all running operations before being removed.

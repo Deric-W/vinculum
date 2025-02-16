@@ -44,6 +44,11 @@
 \usepackage[inkscapepath={./build/svg-inkscape}]{svg}
 \svgpath{{./figures/}}
 
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{pgfplotstable}
+\usepackage{pgffor}
+
 % if you need mathy stuff
 \newtheorem{lem}{Lemma}
 \crefname{lem}{Lemma}{Lemmas}
@@ -167,6 +172,7 @@
   \input{sections/background}
   \input{sections/design.tex}
   \input{sections/implementation}
+  \input{sections/evaluation.tex}
 
   \newpage
 

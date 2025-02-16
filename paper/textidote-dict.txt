@@ -2,6 +2,7 @@ borg
 tmpfs
 Duplicacy
 Vinculum
+vinculum-benchmark
 deduplication
 deduplicated
 deduplicate
