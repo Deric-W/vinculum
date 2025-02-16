@@ -30,6 +30,20 @@ done
 ./scripts/generate_csv.py \
     --borg1 "$borg1" \
     --borg2 "$borg2" \
+    -o "results/chunks4096large.csv" \
+    -a /tmp/thesis \
+    --chunk-size 4096 \
+    --chunks-start 0 \
+    --chunks-end 100001 \
+    --chunks-step 10000 \
+    --manifests-start 4 \
+    --manifests-end 5 \
+    --manifests-step 1 \
+    "$location"
+
+./scripts/generate_csv.py \
+    --borg1 "$borg1" \
+    --borg2 "$borg2" \
     -o "results/manifests0const.csv" \
     -a /tmp/thesis \
     --chunk-size 4096 \

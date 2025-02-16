@@ -157,6 +157,34 @@
         \end{frame}
     }
 
+    \begin{frame}
+        \frametitle{Results (chunk size = 4096 bytes)}
+        \begin{center}
+            \begin{tikzpicture}
+                \pgfplotsset{
+                    table/col sep=comma,
+                    height=.85\textheight
+                }
+                \begin{axis}[
+                    xlabel=Number of chunks,
+                    ylabel=Runtime in seconds,
+                    width=0.75\textwidth,
+                    legend pos=outer north east,
+                    scaled x ticks=base 10:-3
+                ]
+                    \addplot table [x=chunks, y expr=\thisrow{Borg 1 deletion}+\thisrow{Borg 1 compaction}] {benchmark/results/chunks4096large.csv};
+                    \addlegendentry{Borg 1}
+                    \addplot table [x=chunks, y expr=\thisrow{Borg 2 deletion}+\thisrow{Borg 2 compaction}] {benchmark/results/chunks4096large.csv};
+                    \addlegendentry{Borg 2}
+                    \addplot table [x=chunks, y expr=\thisrow{Duplicacy collection}+\thisrow{Duplicacy deletion}] {benchmark/results/chunks4096large.csv};
+                    \addlegendentry{Duplicacy}
+                    \addplot table [x=chunks, y expr=\thisrow{Vinculum collection}+\thisrow{Vinculum deletion}] {benchmark/results/chunks4096large.csv};
+                    \addlegendentry{Vinculum}
+                \end{axis}
+            \end{tikzpicture}
+        \end{center}
+    \end{frame}
+
     \section{Manifest scaling}
     \begin{frame}
         \frametitle{Setup}
