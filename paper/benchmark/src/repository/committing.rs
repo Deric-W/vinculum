@@ -2,7 +2,7 @@
 
 use futures::io::{AsyncWrite, Error as IoError, Result as IoResult};
 use pin_project::pin_project;
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use std::fmt::Debug;
 use std::fs::OpenOptions;
 use std::future::Future;
@@ -90,7 +90,7 @@ async fn create_incoming(mut directory: PathBuf) -> IoResult<RemoveOnDrop> {
     options.write(true);
     options.create_new(true);
     options.mode(0o444);
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut buffer = String::with_capacity(16);
     loop {
         Alphanumeric.append_string(&mut rng, &mut buffer, 16);
