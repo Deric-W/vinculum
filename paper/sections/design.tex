@@ -11,7 +11,7 @@ the operations performed by clients on the repository it must be assumed they ar
 This section will examine the feasibility of these assumptions when using a POSIX~\cite{Posix}
 file system.
 
-\subsection{Creating chunks and manifest files}\label{sec:creation}
+\subsection{Creating Chunks and Manifest Files}\label{sec:creation}
 
 When creating chunks multiple clients may create the same chunk at the same time.
 To deal with this situation the repository must resolve the arising copies by
@@ -31,12 +31,12 @@ other directories.
 Another benefit of this approach is that any existing chunks are replaced,
 resolving any arising copies by freeing their occupied storage space once any
 processes having the file open during the replacement have closed
-it+\cite[function `rename', section `DESCRIPTION']{Posix}.
+it~\cite[function `rename', section `DESCRIPTION']{Posix}.
 To prevent clients from opening the same file in the directory for temporary chunks
 it can be exploited that the file name can be different from the name after
 the rename operation, for example by incorporating the name of the client into the file name
 
-\subsection{Renaming chunks and fossils}
+\subsection{Renaming Chunks and Fossils}
 
 Lock-Free Deduplication requires clients being able to rename chunks to fossils
 during the fossil collection step and doing the reverse during the fossil deletion
@@ -50,7 +50,7 @@ The case where the renaming operation fails because the fossil or chunk was alre
 renamed by another client~\cite[Theorem 2]{Duplicacy} can be detected by checking for the
 `ENOENT' error code~\cite[function `rename', section `ERRORS']{Posix}.
 
-\subsection{Deleting fossils}
+\subsection{Deleting Fossils}
 
 In addition to the aforementioned renaming operation the fossil deletion step
 also requires clients being able to delete fossils.
@@ -60,7 +60,7 @@ The case where the deletion operation fails because the fossil was deleted (or r
 by another client~\cite[Theorem 2]{Duplicacy} can be detected by checking for the
 `ENOENT' error code similar to the `rename' function~\cite[function `unlink', section `ERRORS']{Posix}.
 
-\subsection{Downloading all manifest files}
+\subsection{Downloading all Manifest Files}
 
 Both the fossil collection and the fossil deletion steps begin by downloading all
 manifest files from the repository~\cite[Algorithm 1 and 2]{Duplicacy}.
@@ -137,7 +137,7 @@ This in turn ensures that all manifest files which still reference them were
 created before the execution of the second enumeration operation and are therefore
 reflected by its result.
 
-\subsection{Accessing a chunk}
+\subsection{Accessing a Chunk}
 
 Since \nameref{para:policy2} causes chunk access operations to consist of up to
 two file access operations another client performing the fossil collection or
@@ -189,13 +189,13 @@ Since the renaming and deletion operations do not interfere with already opened
 files~\cite[section `DESCRIPTION' of the functions `unlink' and `rename']{Posix}
 this situation requires no further mitigations.
 
-\section{Error Recovery}
+\section{Error Recovery}\label{sec:errors}
 
 Under real world conditions the algorithm presented in \Cref{sec:algorithm}
 may fail at any time, for example in case of a client experiencing a power failure.
 This section describes methods to recover from such events.
 
-\subsection{Effects of failure}
+\subsection{Effects of Failure}
 
 The set of operations which modify the repository consists of backup creation
 and the fossil collection and deletion steps.
@@ -213,7 +213,7 @@ Should another fossil collection step not try to turn their associated chunks in
 fossils again and subsequently remove them during the fossil deletion step they will also
 remain in the repository indefinitely.
 
-\subsection{Handling unreferenced chunks}\label{sec:unreferenced-chunks}
+\subsection{Handling unreferenced Chunks}\label{sec:unreferenced-chunks}
 
 The unreferenced chunks created by an interrupted backup creation operation can
 not simply be deleted because of the possibility of clients creating backups in
@@ -249,7 +249,7 @@ or at a longer interval than the regular fossil collection steps, which is
 similar to the recommendations for the solution used by Duplicacy suffering
 from the same problem~\cite[topic `Prune command details']{Duplicacy-Forum}.
 
-\subsection{Handling abandoned fossils}\label{sec:abandoned-fossils}
+\subsection{Handling abandoned Fossils}\label{sec:abandoned-fossils}
 
 Since abandoned fossils existing within the repository have no associated fossil
 collection the timestamp for validating \nameref{para:policy3} can not be determined.

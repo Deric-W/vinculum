@@ -1,4 +1,4 @@
-\chapter{Performance evaluation}\label{ch:evaluation}
+\chapter{Performance Evaluation}\label{ch:evaluation}
 
 This chapter will present and discuss the results of several benchmarks which
 were carried out to compare the `Vinculum' library presented in \Cref{ch:implementation}
@@ -41,7 +41,7 @@ with the temporary files receiving random file names and are opened using the
 `O\_EXCL'~\cite{Posix} flag to ensure that clients do not open existing files
 when the file name is already in use.
 
-\section{Participating programs and Environment}
+\section{Participating Programs and Environment}
 
 \begin{table}
     \centering
@@ -92,7 +92,7 @@ processor with 16 GB of memory.
 To reduce disturbances all backups were performed without network access using a
 local hard-drive formatted with the ext4 file system and not in use by other programs.
 
-\section{Virtual machine images}\label{sec:vm-images}
+\section{Virtual Machine Images}\label{sec:vm-images}
 
 \subsection{Setup}
 
@@ -251,7 +251,7 @@ Another reason might be their internal complexity with the support for compressi
 encryption and caching provided by Borg 2 and Duplicacy generating some overhead
 in comparison to the simple frontend implemented by vinculum-benchmark.
 
-\section{Chunk scaling}
+\section{Chunk Scaling}
 
 \subsection{Setup}
 
@@ -327,7 +327,7 @@ its constant nature suggests it being caused by something independent of the
 implementations of the fossil collection and deletion steps such as internal
 complexity or time required for startup.
 
-\section{Backups scaling}\label{sec:backup-scaling}
+\section{Backups Scaling}\label{sec:backup-scaling}
 
 \subsection{Setup}\label{sec:backup-scaling-setup}
 

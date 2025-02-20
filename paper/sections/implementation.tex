@@ -40,7 +40,7 @@ implement~\cite[sections `6.6.' and `6.11.']{Rust-Reference}.
 Since Rust supports conditional compilation~\cite[section `The cfg\_attr attribute']{Rust-Reference}
 the set of items exposed by a crate and its dependencies can be changed when compiling it.
 
-\subsection{The Repository and Manifest traits}\label{sec:traits}
+\subsection{The Repository and Manifest Traits}\label{sec:traits}
 
 The core of Vinculum are the `Repository' and `Manifest' traits which
 represent the repository and manifest described in \Cref{sec:algorithm}.
@@ -65,7 +65,7 @@ To prevent this the repository trait defines a method to explicitly request the 
 of currently existing clients, expecting it to be kept up to date according to
 \Cref{thm:adding-clients} and \Cref{thm:removing-clients}.
 
-\subsection{The FossilCollection struct}
+\subsection{The FossilCollection Struct}
 
 The `FossilCollection' struct represents a fossil collection created by a fossil
 collection step.
@@ -86,7 +86,7 @@ compiling the crate.
 Making users opt into using Serde allows them to remove the dependency on it
 should the required functionality be implemented in another way.
 
-\subsection{The FossilCollectionBuilder struct}
+\subsection{The FossilCollectionBuilder Struct}
 
 To perform a fossil collection step a client has to instantiate the
 `FossilCollectionBuilder' struct which provides the necessary methods to
@@ -136,7 +136,7 @@ In addition to the methods used to mark chunks as referenced or possible fossil
 candidates the FossilCollectionBuilder also provides methods to perform the operations
 described in \Cref{sec:unreferenced-chunks} and \Cref{sec:abandoned-fossils}.
 
-\subsection{The RepositoryExt trait}
+\subsection{The RepositoryExt Trait}
 
 Using the FossilCollectionBuilder can include a lot of boilerplate code should
 the user only use simple backup retention policies such as \Cref{algo:fossil-collection}.
@@ -144,7 +144,7 @@ To reduce it the `RepositoryExt' trait provides methods implementing shortcuts
 to using the FossilCollectionBuilder and is automatically implemented on types
 implementing the Repository trait.
 
-\subsection{The PipelinedFossilCollectionBuilder struct}
+\subsection{The PipelinedFossilCollectionBuilder Struct}
 
 When executing the Lock-Free Deduplication algorithm for an extended period of
 time it is very likely that the fossil collection and deletion steps will be
@@ -168,7 +168,7 @@ After performing the fossil deletion step it will use this information to produc
 and instance of the FossilCollectionBuilder which can be used to perform a fossil
 collection step without downloading additional data from the repository.
 
-\subsection{Iterator and Error types}
+\subsection{Iterator and Error Types}
 
 Besides the aforementioned types there exist also a number of helper types
 which represent errors or iterators~\cite{GoF} of the other types.
@@ -201,7 +201,7 @@ While this increases the complexity of using Vinculum it allows reusing
 implementations of these approaches such as event loops and thread pools from
 existing libraries such as `Tokio'~\cite{Tokio}.
 
-\section{Changes and Problems during development}\label{sec:changes}
+\section{Changes and Problems during Development}\label{sec:changes}
 
 When starting development the first prototype was implemented without using the \\
 `std::future::Future'~\cite{Rust-Docs} trait of the Rust Standard Library.
