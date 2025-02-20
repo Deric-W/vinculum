@@ -39,7 +39,7 @@ and storage costs associated with creating and keeping periodic full backups.
 It also requires keeping backups which are no longer of interest to allow for
 incremental backups based on them to be restored.
 
-Examples of this approach are Déjà Dup~\cite{DejaDup} and Duplicity~\cite{Duplicity} on which it is based.
+Examples of this approach are Déjà Dup~\cite{DejaDup} which is based on Duplicity~\cite{Duplicity}.
 
 \paragraph{Content-addressable storage} An alternative to full/incremental backups which
 still allows applying transformations to the generated backups while avoiding the mentioned
@@ -77,9 +77,9 @@ To reduce the impact of the number of chunks on performance some programs
 like Borg 1~\cite[section `Internals']{Borg1} and restic~\cite[section `Terminology']{restic}
 combine multiple chunks when storing them, for example as a single file in the file system.
 
-Examples of this approach are Pika Backup~\cite{Pika} and Borg 1~\cite{Borg1} on which it is based,
-Borg 2~\cite{Borg2}, restic~\cite{restic}, Duplicacy~\cite{Duplicacy}, Duplicati~\cite{Duplicati}
-and Kopia~\cite{Kopia}.
+Examples of this approach are Borg 1~\cite{Borg1}, Borg 2~\cite{Borg2}, restic~\cite{restic},
+Duplicacy~\cite{Duplicacy}, Duplicati~\cite{Duplicati}, Kopia~\cite{Kopia} and
+Pika Backup~\cite{Pika} which is based on Borg 1.
 
 \paragraph{Other} Besides the aforementioned solutions there are a number of alternatives
 like Bacula~\cite{Bacula} which for the purpose of clarity will not be further investigated.

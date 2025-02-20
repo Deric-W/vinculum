@@ -7,7 +7,7 @@ for them.
 \section{Non-atomic Operations}
 
 Since \cite{Duplicacy} does not make any explicit claims about the atomicity of
-the operations clients perform on the repository it must be assumed they are atomic.
+the operations performed by clients on the repository it must be assumed they are atomic.
 This section will examine the feasibility of these assumptions when using a POSIX~\cite{Posix}
 file system.
 
@@ -55,7 +55,7 @@ renamed by another client~\cite[Theorem 2]{Duplicacy} can be detected by checkin
 In addition to the aforementioned renaming operation the fossil deletion step
 also requires clients being able to delete fossils.
 Since the fossils exist as individual files they can be deleted by using the
-`unlink'+\cite{Posix} function which also available on all POSIX conforming systems.
+`unlink'~\cite{Posix} function which also available on all POSIX conforming systems.
 The case where the deletion operation fails because the fossil was deleted (or renamed)
 by another client~\cite[Theorem 2]{Duplicacy} can be detected by checking for the
 `ENOENT' error code similar to the `rename' function~\cite[function `unlink', section `ERRORS']{Posix}.
