@@ -1,4 +1,4 @@
-\chapter{Background}\label{ch:background}
+\chapter{Background and Related Work}\label{ch:background}
 
 The following chapter is intended to give readers an overview about the
 subject and state of the art of open source backup solutions.
@@ -8,12 +8,48 @@ It will also define important concepts used throughout this thesis.
 
 Since the need for recovering data after a catastrophic failure such as a hardware
 malfunction is not new there are a number of existing solutions to this problem.
+\Cref{tab:approaches} compares a selection of commonly used approaches.
 
-\paragraph{rsync} A possible way of implementing such a solution is based on the
+A common scenario is the creation of periodic backups of a single dataset, for
+example photos stored on a personal computer.
+Because such datasets often do not change significantly between them individual
+backups may contain redundant data which can be removed.
+Such a deduplication of data can also be useful when multiple similar datasets
+have to be backed up, for example all workstation computers in an office.
+
+Another use case is the transformation of the generated backup data before storage.
+Examples of this are applying compression to reduce the required storage space
+or encrypting the data to protect it from unwanted access.
+
+There is also the problem of the storage space available for backups being limited.
+To allow continuous backups old backups have to be deleted which is controlled
+by a backup retention policy.
+A widely used example is the Grandfather-father-son (GFS) policy which allows
+keeping many current backups while also keeping a smaller number of older
+backups by gradually deleting backups as they get older~\cite[section `Usage']{Borg1}.
+
+\begin{table}
+    \resizebox{\textwidth}{!}{
+        \begin{tabular}{ c c c c }
+            \toprule
+            Approach & Hard links & Full/incremental backups & Content-addressable storage \\
+            \midrule
+            Deduplication & individual files & changed data & chunks \\
+            \midrule
+            Transformations & no & yes & yes \\
+            \midrule
+            Constraints on deletion & no & yes & no \\
+            \bottomrule
+        \end{tabular}
+    }
+    \caption{Comparison of a selection of existing backup approaches.}\label{tab:approaches}
+\end{table}
+
+\paragraph{Hard links} A possible way of implementing such a solution is based on the
 rsync tool which allows copying directories while replacing files existing in
 other directories with hard links to them~\cite[argument `--link-dest']{rsync}.
-This in turn allows saving storage space when performing periodic backups and a
-backup contains unchanged files which are already contained in a previous backup.
+This in turn allows saving storage space by sharing files contained in a specific
+backup with other backups containing the same files.
 The operating system ensures that when deleting a backup the files being referenced
 by hard links from other backups are not actually deleted but remain accessible.
 
@@ -29,7 +65,7 @@ backups~\cite[section `DESCRIPTION']{Duplicity}, which are not possible when per
 backups based purely on rsync since it was originally designed to be
 `a fast, versatile, remote (and local) file-copying tool'~\cite{rsync}.
 Another advantage is the ability to detect and store differences between files of different
-backups, allowing for storage space savings where rsync would require creating a new
+backups, allowing to save storage space where rsync would require creating a new
 file containing only slight differences from a previous backup~\cite[section `OPERATION AND DATA FORMATS']{Duplicity}.
 
 A drawback of this approach is the need to apply all incremental backups performed since
@@ -79,16 +115,17 @@ combine multiple chunks when storing them, for example as a single file in the f
 
 Examples of this approach are Borg 1~\cite{Borg1}, Borg 2~\cite{Borg2}, restic~\cite{restic},
 Duplicacy~\cite{Duplicacy}, Duplicati~\cite{Duplicati}, Kopia~\cite{Kopia} and
-Pika Backup~\cite{Pika} which is based on Borg 1.
+Pika Backup~\cite{Pika} which is based on Borg 1. \\
 
-\paragraph{Other} Besides the aforementioned solutions there are a number of alternatives
-like Bacula~\cite{Bacula} which for the purpose of clarity will not be further investigated.
+Besides the aforementioned solutions there are a number of
+alternatives like Bacula~\cite{Bacula} which because of their comparatively low
+popularity and time constraints where not further investigated.
 
 \section{Lock-Free Deduplication}
 
 \subsection{Duplicacy}
 
-In their 2020 paper~\cite{Duplicacy} Gilbert Chen et al.\ proposed a solution to
+In 2020 Gilbert et al.\ proposed~\cite{Duplicacy} a solution to
 the problem of periodic chunk deletion operations requiring exclusive access when
 using a shared content-addressable storage for backup operations.
 Their solution consists of a new backup program called `Duplicacy' which, while
@@ -138,14 +175,14 @@ access~\cite[section `Naming Chunks Based Backup']{Duplicacy}.
 It is used by multiple actors which can perform operations such as creating
 and deleting backups on the repository, called `\textit{clients}'.
 To create a backup a client generates chunks as outlined in the previous
-section but when uploading them to the repository follows the following policy:
+section but when uploading them to the repository follows the following policy~\cite{Duplicacy}:
 
 \begin{samepage}
     \paragraph{Policy 1}\label{para:policy1} (Checking before Uploading).
     \textit{
         Before uploading a new chunk, the backup procedure always performs
         a lookup with a filename determined only by the chunk content hash.
-    }~\cite{Duplicacy} \\
+    } \\
 \end{samepage}
 
 
@@ -177,8 +214,8 @@ When deleting a backup by simply deleting chunks which would become unreferenced
 there is the possibility of a chunk being deleted while another client creates a
 manifest file referencing it, causing the restoration of the associated backup to
 fail.
-To prevent this instead of deleting them such chunks are first turned into `\textit{fossils}'
-by renaming them, allowing them to be referenced by the following policy:
+To prevent this instead of being deleted such chunks are first turned into `\textit{fossils}'
+by renaming them, allowing them to be referenced by the following policy~\cite{Duplicacy}:
 
 \begin{samepage}
     \paragraph{Policy 2}\label{para:policy2} (Fossil Accessing).
@@ -192,7 +229,7 @@ by renaming them, allowing them to be referenced by the following policy:
             A backup procedure cannot access any fossils. That is, it must upload
             a chunk if it cannot find the chunk, even if a corresponding fossil exists.
         }
-    \end{enumerate}~\cite{Duplicacy} \\
+    \end{enumerate}
 \end{samepage}
 
 This step is called the `\textit{fossil collection step}' and consists of downloading
@@ -202,7 +239,7 @@ fossils~\cite[section `Two Step Fossil Deletion']{Duplicacy}.
 
 The actual deletion of the created fossils is performed by the `\textit{fossil deletion step}',
 which will be delayed until the fossils will no longer be referenced by any manifest files
-which are in the process of being created as by the following policy:
+which are in the process of being created as by the following policy~\cite{Duplicacy}:
 
 \begin{samepage}
     \paragraph{Policy 3}\label{para:policy3} (Fossil Deleting).
@@ -216,7 +253,7 @@ which are in the process of being created as by the following policy:
             For each backup client, the new backup must have finished after
             the fossil collection step.
         }
-    \end{enumerate}~\cite{Duplicacy} \\
+    \end{enumerate}
 \end{samepage}
 
 Should these two conditions be met downloading all manifest files existing in the

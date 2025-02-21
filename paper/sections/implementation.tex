@@ -97,10 +97,6 @@ of a complex object, in this case the FossilCollection struct~\cite{GoF}.
 The fossil collection step requires choosing which manifest files to
 delete~\cite[Algorithm 1]{Duplicacy}, which is depends on the policy used
 by the users of Vinculum.
-A widely used example is the Grandfather-father-son (GFS) policy which allows
-keeping many current backups while also keeping a smaller number of older
-backups by gradually deleting backups as they get older~\cite[section `Usage']{Borg1}.
-
 To prevent all manifest files from being downloaded twice by the client evaluating its backup
 retention policy and the fossil collection step requiring downloading all manifest
 files~\cite[Algorithm 1]{Duplicacy} the task of downloading them is delegated to the client.
