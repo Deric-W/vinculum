@@ -1,0 +1,27 @@
+\chapter{Conclusion and Future Work}\label{ch:conclusion}
+
+In this thesis an open-source implementation called `Vinculum' of the Lock-Free
+Deduplication algorithm described by Gilbert et al.~\cite{Duplicacy} is presented.
+It is structured as a reusable library to aid users in applying the algorithm
+under real world conditions such as creating fully functional backup solutions.
+
+While a simple program based on it performed favorably in benchmarks comparing
+it to existing backup solutions there is still a lot to do to create a real
+alternative to them.
+One way users of Vinculum could be supported in this regard is by providing
+an additional library which extends the interfaces described in \Cref{sec:traits}
+with methods operating on a higher abstraction level than the chunk-based operations
+used by Vinculum.
+This way it can impose additional constraints and interfaces while preventing all
+users of Vinculum from being affected by them.
+
+Other avenues for future work are the investigation of the robustness of the
+Lock-Free Deduplication algorithm to the repository experiencing catastrophic
+errors such as a power failure or its interaction with different consistency
+models besides the one provided by POSIX file systems.
+While major providers such as Amazon S3~\cite{s3} and Google Cloud Storage~\cite{GoogleCS}
+claim to provide strong consistency investigating the interaction of other consistency
+models with the Lock-Free Deduplication algorithm may provide opportunities for
+performance improvements.
+
+The source code of Vinculum is available on GitHub\footnote{\url{https://github.com/Deric-W/vinculum}}.

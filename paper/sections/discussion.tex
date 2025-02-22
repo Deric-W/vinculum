@@ -1,0 +1,44 @@
+\chapter{Discussion}\label{ch:discussion}
+
+The results presented in \Cref{ch:evaluation} depict Vinculum as possessing a
+shorter running time and scaling at least as good as the other participating programs.
+
+While this is the case for the scenarios measured by the benchmarks it is important
+to remember the differences in internal complexity as described in \Cref{sec:usage}.
+Since Vinculum only concerns itself with performing the fossil collection and deletion
+steps the overall performance of programs using it is strongly influenced by their
+individual implementations of the repository and backup creation.
+
+A more conclusive performance evaluation needs to measure the behavior in real-world
+situations which includes the creation of backups and remote repositories.
+While the benchmarks performed in \Cref{ch:evaluation} attempt to provide a
+level playing field the vinculum-benchmark program described in \Cref{sec:repo-implementation}
+provides only primitive options for creating backups while not dealing with concerns
+such as privacy or reducing possible network access through caching and is therefore
+unusable as a real backup solution.
+
+This also highlights the amount of work required to create a backup solution
+comparable with the existing ones.
+While Vinculum extends the Lock-Free Deduplication algorithm with features
+such as client management (\Cref{sec:adding-clients}, \Cref{sec:removing-clients})
+and error recovery (\Cref{sec:abandoned-fossils}, \Cref{sec:unreferenced-chunks})
+and provides the building blocks the actual implementation is deferred to its users.
+Since this requires the consideration of additional concerns the users have to
+implement features such as encryption, compression and caching on their own.
+
+The paper describing the Lock-Free Deduplication algorithm does provide
+descriptions of how encryption, compression and caching can be implemented, but
+the solutions restrict the way other concerns such as the backup retention policy
+or chunk creation are
+implemented~\cite[sections `Caching' and `Compression and Encryption']{Duplicacy}.
+While the development of Vinculum started with the intent of providing a unified
+interface on which these features could be implemented as reusable independent
+components it was abandoned for reasons explained in \Cref{sec:changes}.
+
+There are also some scenarios which where not discussed in \Cref{ch:design}.
+One of them is the repository experiencing catastrophic errors such as a power
+failure.
+While \Cref{sec:errors} provides solutions to recover from clients experiencing
+them and the approach described in \Cref{sec:creation} can be modified to guard
+against partially written files being left behind there may be unforeseen interactions
+with the fossil collection and deletion steps.

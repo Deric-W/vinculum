@@ -6,10 +6,11 @@ implementation in the form of the `Vinculum' library.
 This library is implemented in Rust~\cite{Rust} Programming Language, allowing
 it to leverage its high-level features while having low-level control.
 
-\section{Intended Usage}
+\section{Intended Usage}\label{sec:usage}
 
-Creating a fully functioning backup program requires more than just implementing
-the Lock-Free Deduplication algorithm.
+Vinculum is intended to assist authors of backup programs in implementing the
+Lock-Free Deduplication algorithm while creating a fully functioning backup
+program requires additional problems to be solved.
 Before chunks can be uploaded to a repository they have to be created from the data
 to be backed up, which itself is a problem with multiple existing solutions and tradeoffs
 as shown by Duplicacy allowing to choose between two of them~\cite[section `Chunking']{Duplicacy}.
