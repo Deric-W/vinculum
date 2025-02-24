@@ -3,7 +3,7 @@
 After explaining the modifications to the Lock-Free Deduplication algorithm
 in \Cref{ch:design} this chapter will provide a deeper insight into their
 implementation in the form of the `Vinculum' library.
-This library is implemented in Rust~\cite{Rust} Programming Language, allowing
+This library is implemented in the Rust~\cite{Rust} Programming Language, allowing
 it to leverage its high-level features while having low-level control.
 
 \section{Intended Usage}\label{sec:usage}
@@ -18,7 +18,7 @@ There are also additional use cases, such as compressing or encrypting the data
 stored in the repository for additional space savings of protection from unwanted
 access.
 
-While the paper~\cite{Duplicacy} provides solutions for them there are existing
+While Gilbert et al.~\cite{Duplicacy} provide solutions for them there are existing
 alternatives such as the encryption used by Borg 2~\cite[section `Internals']{Borg2}
 which itself is the result of further development of the encryption used in
 Borg 1~\cite[section `Internals']{Borg1}.
@@ -44,7 +44,7 @@ the set of items exposed by a crate and its dependencies can be changed when com
 \subsection{The Repository and Manifest Traits}\label{sec:traits}
 
 The core of Vinculum are the `Repository' and `Manifest' traits which
-represent the repository and manifest described in \Cref{sec:algorithm}.
+represent the repository and manifest file described in \Cref{sec:algorithm}.
 They are intended to be implemented by repository implementations provided by the
 users of Vinculum and define the methods used by the types defined in the
 library to interact with them.
@@ -73,7 +73,7 @@ collection step.
 It stores the data required by a fossil deletion step and provides methods to
 perform it.
 
-Since the fossil collection is usually persisted (for example by it being stored
+Since the fossil collection is usually persisted (for example by being stored
 in the file system) while the client waits until the fossil deletion step can be
 performed its has to be able to be serialized and deserialized.
 A popular way of implementing this in the Rust ecosystem consists of defining
@@ -96,15 +96,17 @@ Its name comes from the `Builder' design pattern which encapsulates the creation
 of a complex object, in this case the FossilCollection struct~\cite{GoF}.
 
 The fossil collection step requires choosing which manifest files to
-delete~\cite[Algorithm 1]{Duplicacy}, which is depends on the policy used
-by the users of Vinculum.
-To prevent all manifest files from being downloaded twice by the client evaluating its backup
+delete~\cite[Algorithm 1]{Duplicacy}, which depends on the backup retention
+policy used by the users of Vinculum.
+To prevent all manifest files from being downloaded twice by the user evaluating its backup
 retention policy and the fossil collection step requiring downloading all manifest
-files~\cite[Algorithm 1]{Duplicacy} the task of downloading them is delegated to the client.
-This way the client can perform the necessary operations to determine which manifest files
+files~\cite[Algorithm 1]{Duplicacy} the task of downloading them is delegated to the user.
+This way the user can perform the necessary operations to determine which manifest files
 should be deleted and pass the resulting information to the FossilCollectionBuilder by
-marking individual chunks as either referenced or possible fossil candidates.
+marking individual chunks as either being referenced or possible fossil candidates.
 
+When performing the fossil collection step the FossilCollectionBuilder will turn
+all fossil candidates which where not marked as being referenced into fossils.
 Should the client already know which manifest files to delete the result would be
 the following procedure (with all functions except `deleteManifestFiles' being
 provided by FossilCollectionBuilder or the Repository or Manifest traits):
@@ -138,19 +140,19 @@ described in \Cref{sec:unreferenced-chunks} and \Cref{sec:abandoned-fossils}.
 Using the FossilCollectionBuilder can include a lot of boilerplate code should
 the user only use simple backup retention policies such as \Cref{algo:fossil-collection}.
 To reduce it the `RepositoryExt' trait provides methods implementing shortcuts
-to using the FossilCollectionBuilder and is automatically implemented on types
+to using the FossilCollectionBuilder and is automatically implemented for types
 implementing the Repository trait.
 
 \subsection{The PipelinedFossilCollectionBuilder Struct}
 
 When executing the Lock-Free Deduplication algorithm for an extended period of
 time it is very likely that the fossil collection and deletion steps will be
-performed periodically to space for new backups being created.
+performed periodically to reclaim space for new backups being created.
 Since the client performing them has to alternate between executing a fossil
 collection and deletion step it can only remove fossils on every second invocation.
 Performing a fossil collection step immediately after completing a fossil deletion
 step allows the client to delete fossils on every invocation should \nameref{para:policy3}
-not cause the fossil deletion step to be delayed.
+not cause the fossil deletion step to be delayed which is depicted in \Cref{fig:pipelining}.
 
 Since performing the fossil deletion and collection steps back to back causes
 all manifest files existing in the repository to be downloaded twice~\cite[Algorithm 1 and 2]{Duplicacy}
@@ -159,37 +161,42 @@ This is possible by using the `PipelinedFossilCollectionBuilder' struct in place
 of the FossilCollectionBuilder.
 
 The difference between them is that the PipelinedFossilCollectionBuilder also
-perform the fossil deletion step of an existing fossil collection but does not
+performs the fossil deletion step of an existing fossil collection but does not
 discard the downloaded manifest file information.
 After performing the fossil deletion step it will use this information to produce
-and instance of the FossilCollectionBuilder which can be used to perform a fossil
-collection step without downloading additional data from the repository.
+and instance of the FossilCollectionBuilder struct which can be used to perform
+a fossil collection step without downloading additional data from the repository.
+
+\begin{figure}
+    \includesvg[width=0.95\textwidth, pretex=\small]{pipelining.drawio.svg}
+    \caption{Comparision between pipelined (lower) and non-pipelined (upper) periodic fossil deletion, with invocations deleting fossils in green.}\label{fig:pipelining}
+\end{figure}
 
 \subsection{Iterator and Error Types}
 
 Besides the aforementioned types there exist also a number of helper types
-which represent errors or iterators~\cite{GoF} of the other types.
+which represent errors or iterators~\cite{GoF} used by the other types.
 
 While the iterator types are often very simple they increase encapsulation by
 controlling which details of the iterators provided by the internally used data
 structures are exposed to the user.
 
-The error types on the other hand allow multiple methods consuming a type to
-return its ownership to the caller should they encounter errors, allowing the
-operation to be retried. 
+The error types on the other hand allow for a more fine-grained error reporting
+and make it possible for multiple methods consuming a type to return its ownership
+to the caller should they encounter errors, allowing the operation to be retried.
 
 \section{Parallelism}\label{sec:parallelism}
 
 There are multiple steps in the Lock-Free Deduplication algorithm which have no
-ordering requirement between them, such as renaming chunks or fossils or downloading
-individual manifest files.
+ordering requirement between them, such as renaming individual chunks or fossils
+or downloading individual manifest files.
 To allow clients to better utilize the resources of the repository Vinculum
 can be instructed to perform them in parallel.
 Since the way parallelism is achieved varies depending on the repository implementations
 supplied by the users the `std::future::Future'~\cite{Rust-Docs} trait of the Rust
 Standard Library is used to provide a uniform interface to them.
 
-For example an implementation communicating with a remote machine over the network
+For example, an implementation communicating with a remote machine over the network
 may use asynchronous I/O facilities such as the `poll'~\cite{Posix} function of
 POSIX conforming systems while other implementations may queue work on a
 thread pool to access the local file system or perform CPU-intensive tasks.

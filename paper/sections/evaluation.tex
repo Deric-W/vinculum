@@ -19,8 +19,8 @@ library to perform file system operations in parallel.
 The manifest files are directly stored in a directory called `manifests' with their
 file name corresponding to the name assigned by the user.
 To reduce complexity the list of chunks referenced by them is not stored
-in chunks like it is done in Duplicacy~\cite[section `Naming Chunks']{Duplicacy}
-but directly stored in the files using a simple binary encoding.
+in chunks like how it is done by Duplicacy~\cite[section `Naming Chunks']{Duplicacy}
+but is instead stored directly in the files using a simple binary encoding.
 
 Chunks and fossils are stored in separate directories to allow them to be
 enumerated efficiently as required by \Cref{sec:unreferenced-chunks} and
@@ -97,7 +97,7 @@ local hard-drive formatted with the ext4 file system and not in use by other pro
 \subsection{Setup}
 
 The first benchmark is inspired by one of the benchmarks performed in the paper
-of Chen, Gilbert et al.~\cite{Duplicacy}.
+of Gilbert et al.~\cite{Duplicacy}.
 The original benchmark consists of creating a VirtualBox Virtual Machine Image
 of a machine running CentOS 7 and measuring the creation of backups of it at
 the following points~\cite[section `EVALUATION AND ANALYSIS']{Duplicacy}:
@@ -108,7 +108,7 @@ the following points~\cite[section `EVALUATION AND ANALYSIS']{Duplicacy}:
 \end{enumerate}
 
 For this benchmark Ubuntu Desktop 24.10 was used and the following APT packages
-selected as developer tools:
+selected as developer tools, causing the images to be around 9 GB in size.
 \begin{itemize}
     \item clang
     \item rust-all
@@ -121,13 +121,13 @@ Since Vinculum only concerns itself with performing the fossil collection
 and deletion steps the benchmark was altered to not measure the creation of
 the backups but their removal.
 
-After creating the backups with a fixed chunk size of one MiB they were pruned
-in the order of their creation.
+After creating the backups with a fixed chunk size of one MiB to ensure every
+program generating the same chunks they were pruned in the order of their creation.
 All programs required multiple steps to delete a single backup with them being
 fossil collection and deletion in the case of Duplicacy and vinculum-benchmark
 and deletion and compaction in the case of Borg 1 and 2.
 The time required by the individual steps was measured using the elapsed time
-between the start of the commands programs and their termination.
+between the start of the commands and their termination.
 
 \subsection{Results}\label{sec:vm-images-results}
 
@@ -224,7 +224,8 @@ taken by first step of backup deletion being shown in blue and the second step
 shown in red.
 
 All programs exhibit a similar pattern when comparing the total durations of their
-deletion operations which can be explained by the amount of data deleted by each
+deletion operations with the last removal taking the longest, followed by the first
+and second removal, which can be explained by the amount of data deleted by each
 operation.
 The first backup was created after completing the setup and shared a large amount
 of data with the other two backups, causing only data changed by the installation
@@ -244,7 +245,8 @@ a special entry into a segment file with the actual deletion being done by
 the compaction step.
 During this step segments containing a certain number of deleted entries are
 read and the remaining entries stored as a new segment using information recorded
-during backup creation and deletion~\cite[section `Internals']{Borg1}.
+during backup creation and deletion~\cite[section `Internals']{Borg1}, replacing
+the old segment files.
 Since this may require additional I/O operations in comparison to deleting individual
 files it likely caused a slowdown depending on the amount of data deleted.
 
@@ -293,7 +295,8 @@ the data contained in them is small by reducing the amount of file system operat
 such as deletions to be performed.
 Should their size increase the overhead created by the compaction algorithm described
 in \Cref{sec:vm-images-results} will also increase and seems to surpass the advantage of
-having to manage a smaller number of files, turning it into a disadvantage.
+having to manage a smaller number of files, turning the segment files into a
+disadvantage.
 
 While the chunk size doesn't seem to affect the rest of the programs for the most
 part its shown that Duplicacy and Vinculum feature an almost identical increase
@@ -519,13 +522,13 @@ with a possible explanation being the number of chunks being too low to have a
 visible effect.
 
 What can be deduced is that while the runtime of Borg 1 and 2 seems to exhibit
-quadratic growth the runtime of Duplicacy and Vinculum seems to be constant.
+a quadratic growth the runtime of Duplicacy and Vinculum seems to be constant.
 When looking at the magnified data presented in the subplots of \Cref{fig:backups-scaling}
 it becomes apparent that their runtime also increases with the number of backups,
 albeit much slower and apparently linearly.
 
 The difference between the slopes of the graphs of Duplicacy and Vinculum
-may be explained by the cache activity performed by Duplicacy as described
+may be explained by the caching operations performed by Duplicacy as described
 in \Cref{sec:backup-scaling-setup}.
 Since Duplicacy needs to access some chunks to download all manifest
 files~\cite[section `Naming Chunks']{Duplicacy} and stores them in a cache on the

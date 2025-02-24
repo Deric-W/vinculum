@@ -8,7 +8,7 @@ for them.
 
 Since \cite{Duplicacy} does not make any explicit claims about the atomicity of
 the operations performed by clients on the repository it must be assumed they are atomic.
-This section will examine the feasibility of these assumptions when using a POSIX~\cite{Posix}
+This section will examine the feasibility of this assumption when using a POSIX~\cite{Posix}
 file system.
 
 \subsection{Creating Chunks and Manifest Files}\label{sec:creation}
@@ -32,7 +32,7 @@ Another benefit of this approach is that any existing chunks are replaced,
 resolving any arising copies by freeing their occupied storage space once any
 processes having the file open during the replacement have closed
 it~\cite[function `rename', section `DESCRIPTION']{Posix}.
-To prevent clients from opening the same file in the directory for temporary chunks
+To prevent clients from opening the same file in the directory for temporary files
 it can be exploited that the file name can be different from the name after
 the rename operation, for example by incorporating the name of the client into the file name
 
@@ -45,7 +45,7 @@ step~\cite[section `Two Step Fossil Deletion']{Duplicacy}.
 Besides the chunks existing as individual files it can also be assumed that
 chunks and fossils are located on the same file system~\cite[section `Naming Chunks']{Duplicacy}.
 Under these conditions the operation can be performed by using the aforementioned
-`rename'+\cite{Posix}.
+`rename'~\cite{Posix} function.
 The case where the renaming operation fails because the fossil or chunk was already
 renamed by another client~\cite[Theorem 2]{Duplicacy} can be detected by checking for the
 `ENOENT' error code~\cite[function `rename', section `ERRORS']{Posix}.
@@ -55,7 +55,7 @@ renamed by another client~\cite[Theorem 2]{Duplicacy} can be detected by checkin
 In addition to the aforementioned renaming operation the fossil deletion step
 also requires clients being able to delete fossils.
 Since the fossils exist as individual files they can be deleted by using the
-`unlink'~\cite{Posix} function which also available on all POSIX conforming systems.
+`unlink'~\cite{Posix} function which is also available on all POSIX conforming systems.
 The case where the deletion operation fails because the fossil was deleted (or renamed)
 by another client~\cite[Theorem 2]{Duplicacy} can be detected by checking for the
 `ENOENT' error code similar to the `rename' function~\cite[function `unlink', section `ERRORS']{Posix}.
@@ -85,7 +85,7 @@ the enumeration of the directory.
 operation its result would be a snapshot of the repository at a point during
 its execution.
 The directory enumeration operation possibly not reflecting manifest file creations
-happening during its execution would be equivalent to them moved freely before or
+happening during its execution would be equivalent to them being moved freely before or
 after that point from the perspective of the client performing the directory
 enumeration operation.
 \Cref{fig:listing-proof-idea} contains an example with the snapshot point being marked
@@ -97,12 +97,12 @@ as a dotted red line.
 \end{figure}
 
 \paragraph{Proof} Since manifest file creation is not synchronized with the
-enumeration operation of the directory an atomic operation can not guarantee
+directory enumeration operation an atomic operation can not guarantee
 whether a creation operation happening during its execution will be performed
 before or after its snapshot point and therefore reflected by its result.
 Since a non-atomic enumeration operation provides the same guarantees for
 the visibility of individual operations happening during its execution there
-is no difference between in this regard.
+is no difference between them in this regard.
 
 The same is true for creation operations happening before or after the execution
 of the atomic or non-atomic enumeration operations since the non-atomic operation
@@ -141,7 +141,7 @@ reflected by its result.
 
 Since \nameref{para:policy2} causes chunk access operations to consist of up to
 two file access operations another client performing the fossil collection or
-deletion steps can rename the chunk or its fossils between them.
+deletion steps can rename the chunk or its fossils between their executions.
 This in turn can cause the chunk to appear as missing as shown in \Cref{fig:nonatomic-access}.
 In this example a client creates a manifest file called `\#1' during a fossil
 collection step, causing on of the chunks referenced by it to be turned into a
@@ -168,16 +168,16 @@ perspective of the accessing client.
 \end{samepage}
 
 \paragraph{Proof} A client performing the fossil deletion step must make sure
-\nameref{para:policy3} is satisfied before continuing, causing fossil deletion
-steps started after the client created its last manifest file to be delayed until
-the client creates a new manifest file.
+\nameref{para:policy3} is satisfied before continuing, causing the fossil deletion
+steps associated with fossil collection steps which completed after the client created
+its last manifest file to be delayed until the client creates a new manifest file.
 Since \Cref{thm:singleclient} limits the amount of pending fossil deletion steps
-to one the chunk may only be recovered once during the access operations performed
+to one the chunk can only be recovered once during the access operations performed
 by the client.
 
 Should the client fail to access either the chunk or its associated fossil on
-the first try because the fossil was recovered it will succeed in accessing the
-chunk on the second try because it can not be recovered a second time.
+the first try because the fossil was recovered it will succeed in accessing one
+of them on the second try because the fossil can not be recovered a second time.
 Should the fossil be deleted instead the client will fail to access it or its
 associated chunk on the second try unless it was recreated in the meantime. \\
 
@@ -186,7 +186,7 @@ after successfully accessing a file with the `open' function it
 has to read it using the `read' function, allowing other clients to rename or
 delete the file in the meantime~\cite{Posix}.
 Since the renaming and deletion operations do not interfere with already opened
-files~\cite[section `DESCRIPTION' of the functions `unlink' and `rename']{Posix}
+files~\cite[section `DESCRIPTION' of the `unlink' and `rename' functions]{Posix}
 this situation requires no further mitigations.
 
 \section{Error Recovery}\label{sec:errors}
@@ -200,8 +200,8 @@ This section describes methods to recover from such events.
 The set of operations which modify the repository consists of backup creation
 and the fossil collection and deletion steps.
 
-Should a client creating a backup be interrupted it might have already uploaded
-some chunks to the repository without creating a manifest file.
+Should a client be interrupted while creating a backup he might have already
+uploaded some chunks to the repository without creating a manifest file.
 Should no client create a manifest file referencing these chunks they will be
 invisible to the fossil collection step and therefore remain in the repository
 indefinitely.
@@ -217,7 +217,8 @@ remain in the repository indefinitely.
 
 The unreferenced chunks created by an interrupted backup creation operation can
 not simply be deleted because of the possibility of clients creating backups in
-parallel and therefore have to be made visible to a fossil collection step.
+parallel and therefore have to be made visible to a fossil collection step to
+allow them to be deleted by the Lock-Free Deduplication algorithm.
 
 \begin{thm}\label{thm:unreferenced-chunks}
     Assuming there is a way of enumerating all chunks existing in a repository.
@@ -273,7 +274,7 @@ To prevent this the empty list of manifest files seen by the fossil collection
 step will cause all existing manifest files to be treated as being new and
 therefore taken into consideration by it.
 Since the fossils which were not created by the fossil collection step existed
-in the repository and were therefore created before it completed \nameref{para:policy3}
+in the repository (and where therefore created) before it completed \nameref{para:policy3}
 will ensure that they can not be referenced by any manifest files which are in the
 process of being created
 
@@ -305,7 +306,7 @@ While Duplicacy solves this problem by excluding clients which have not created 
 for 7 days this approach allows for data loss to occur when creating a backup takes
 longer than this time period~\cite[topic `Prune command details']{Duplicacy-Forum}.
 
-Both of those problems could be solved by allowing clients to be added or removed
+Both of those problems could be solved by allowing clients to be added and removed
 from the repository.
 This section investigates which conditions have to be upheld to not disrupt
 the Lock-Free Deduplication algorithm.
@@ -345,8 +346,8 @@ with the client not having created a single manifest file yet.
 \paragraph{Proof} Performing the fossil deletion step requires downloading a list
 of all existing clients from the repository to check whether \nameref{para:policy3}
 is satisfied~\cite[Algorithm 2]{Duplicacy}.
-In addition to creating manifests a new client can interact with a fossil deletion
-step by it being contained in this list.
+In addition to creating manifest files a new client can interact with a fossil
+deletion step by it being contained in this list.
 
 Should the client be added to the repository before the list of existing clients
 is downloaded it will be treated the same as the existing clients with it possibly
@@ -355,12 +356,13 @@ not having created a manifest file yet.
 Should the client be added to the repository after the list of existing clients
 is downloaded it will be ignored by the check of \nameref{para:policy3}.
 Should this be the case any fossils operated on by the fossil deletion step will
-already exist in the repository since a fossil deletions step implementing
-\Cref{thm:singleclient} will only access fossils created by its associated fossil
-collection step.
-Since the new manifest files can not reference the existing fossils because of
-\nameref{para:policy2} the fossil deletion step does not have to be delayed until
-their creation to correctly determine whether a fossil has to be recovered.
+already exist in the repository since a fossil deletion step implementing
+\Cref{thm:singleclient} will only access fossils created before its associated
+fossil collection step completed.
+Since the new manifest files of the client can not reference the existing fossils
+because of \nameref{para:policy2} the fossil deletion step does not have to be
+delayed until their creation to correctly determine whether a fossil has to be
+recovered.
 
 \begin{thm}\label{thm:adding-clients}
     Expanding the list of existing clients does not disrupt the Lock-Free
@@ -399,12 +401,12 @@ Deduplication algorithm.
 validations of \nameref{para:policy3}, causing it to behave as if the client
 never existed.
 Should this be the case all manifest files created by the client were created
-before it was removed from the repository and are therefore visible to the
+before he was removed from the repository and are therefore visible to the
 fossil deletion step.
 Since the set of all manifest files of a client contains the set of manifest
 files referencing fossils this provides the same guarantee as \nameref{para:policy3}
 had the client not been removed from the repository.
 
 Should the client have performed a fossil collection step without performing the
-associated fossil deletion step before removal the fossils created by it will be
-abandoned and can be removed by the method described in \Cref{sec:abandoned-fossils}.
+associated fossil deletion step before being removed the fossils created by it
+will be abandoned and can be removed by the method described in \Cref{sec:abandoned-fossils}.

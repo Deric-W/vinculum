@@ -15,7 +15,7 @@ example photos stored on a personal computer.
 Because such datasets often do not change significantly between them individual
 backups may contain redundant data which can be removed.
 Such a deduplication of data can also be useful when multiple similar datasets
-have to be backed up, for example all workstation computers in an office.
+have to be backed up, for example all workstation machines in an office.
 
 Another use case is the transformation of the generated backup data before storage.
 Examples of this are applying compression to reduce the required storage space
@@ -48,6 +48,9 @@ backups by gradually deleting backups as they get older~\cite[section `Usage']{B
 \paragraph{Hard links} A possible way of implementing such a solution is based on the
 rsync tool which allows copying directories while replacing files existing in
 other directories with hard links to them~\cite[argument `--link-dest']{rsync}.
+Backups are stored in separate directories and creating a new one consists of
+copying the data to be backed up into a new directory while instructing rsync
+to search for identical files in the directories containing existing backups.
 This in turn allows saving storage space by sharing files contained in a specific
 backup with other backups containing the same files.
 The operating system ensures that when deleting a backup the files being referenced
@@ -63,7 +66,8 @@ being called `incremental' backups as a result~\cite[section `OPERATION AND DATA
 This allows to apply transformations such as encryption and compression to the generated
 backups~\cite[section `DESCRIPTION']{Duplicity}, which are not possible when performing
 backups based purely on rsync since it was originally designed to be
-`a fast, versatile, remote (and local) file-copying tool'~\cite{rsync}.
+`a fast, versatile, remote (and local) file-copying tool'~\cite{rsync} instead
+of a pure backup solution.
 Another advantage is the ability to detect and store differences between files of different
 backups, allowing to save storage space where rsync would require creating a new
 file containing only slight differences from a previous backup~\cite[section `OPERATION AND DATA FORMATS']{Duplicity}.
@@ -82,7 +86,7 @@ still allows applying transformations to the generated backups while avoiding th
 problems of backups depending on each other consists of splitting the data to be backed up into chunks.
 These chunks are stored in a key-value store based on a key derived from their
 content, allowing different backups which share common data to save storage space
-by referencing the chunks containing this data multiple times~\cite[section `Internals']{Borg1}.
+by sharing the chunks containing it~\cite[section `Internals']{Borg1}.
 When restoring backups the chunks containing its data are retrieved from the key-value store
 and the splitting operation is reversed, thereby avoiding the need to access other backups.
 
@@ -169,13 +173,13 @@ programs such as Borg~\cite[section `Internals']{Borg1, Borg2} and
 restic~\cite[section `Terminology']{restic}.
 The repository stores chunks as separate objects with a name based on their
 individual contents, avoiding the need for a central database to track which
-objects contain which chunks and the associated problems of parallel
+objects contain which chunks and the associated problem of parallel
 access~\cite[section `Naming Chunks Based Backup']{Duplicacy}.
 
 It is used by multiple actors which can perform operations such as creating
 and deleting backups on the repository, called `\textit{clients}'.
 To create a backup a client generates chunks as outlined in the previous
-section but when uploading them to the repository follows the following policy~\cite{Duplicacy}:
+section but when uploading them to the repository obeys the following policy~\cite{Duplicacy}:
 
 \begin{samepage}
     \paragraph{Policy 1}\label{para:policy1} (Checking before Uploading).
@@ -188,7 +192,7 @@ section but when uploading them to the repository follows the following policy~\
 
 Since this will identify existing chunks even when created by other clients
 their backups will share identical
-chunks+\cite[section `Naming Chunks Based Backup']{Duplicacy}.
+chunks~\cite[section `Naming Chunks Based Backup']{Duplicacy}.
 The backup itself consists of a `\textit{manifest file}' which contains the
 necessary metadata to restore it with the chunks uploaded to the repository.
 While this manifest file does not store the data of the backup directly it
@@ -210,10 +214,19 @@ operation~\cite[Theorem 1]{Duplicacy} it does not state whether this is the case
 for manifest files, but upon request this turned out to be not the
 case~\cite[topic `Duplicacy paper data loss ']{Duplicacy-Forum}.
 
+\begin{figure}
+    \includesvg[width=0.95\textwidth, pretex=\small]{naive_deletion.drawio.svg}
+    \caption{Example where directly deleting chunks causes a chunk to be deleted prematurely.}\label{fig:naive-deletion}
+\end{figure}
+
 When deleting a backup by simply deleting chunks which would become unreferenced
 there is the possibility of a chunk being deleted while another client creates a
 manifest file referencing it, causing the restoration of the associated backup to
-fail.
+fail since the chunk does no longer exist in the repository.
+An example of such a scenario is depicted in \Cref{fig:naive-deletion} where
+\nameref{para:policy1} causes the client creating the manifest file to reference
+an existing chunk which is deleted before the manifest file referencing it can
+be seen by the client deleting unreferenced chunks.
 To prevent this instead of being deleted such chunks are first turned into `\textit{fossils}'
 by renaming them, allowing them to be referenced by the following policy~\cite{Duplicacy}:
 
@@ -260,9 +273,10 @@ Should these two conditions be met downloading all manifest files existing in th
 repository will find any new manifest files which may still reference the fossils.
 Should a fossil be referenced it is turned back into a chunk (called `\textit{fossil recovery}'),
 otherwise it is permanently deleted.
-The data required for these operations is taken from a `\textit{fossil collection file}'
-which was created by the fossil collection step and stored outside the repository
-locally by the client performing these operations~\cite[section `Two Step Fossil Deletion']{Duplicacy}. 
+The data required for these operations is taken from a `\textit{fossil collection file}',
+or fossil collection for short, which was created by the fossil collection step
+and stored outside the repository locally by the client performing these
+operations~\cite[section `Two Step Fossil Deletion']{Duplicacy}. 
 
 \subsection{Race condition}\label{sec:race-condition}
 
@@ -275,7 +289,7 @@ collection and deletion steps at the same time, as shown in \Cref{fig:race-candi
     \caption{Example of parallel execution causing data loss.}\label{fig:race-candition}
 \end{figure}
 
-In the shown example there exist 3 clients which operate on a central repository.
+In the example there are 3 clients which operate on a central repository.
 It begins with a client creating a backup called `\#1', which consists of uploading
 a new chunk and a manifest file referencing it.
 After that another client performs the fossil collection step required to delete
@@ -287,7 +301,7 @@ However, before it is executed, another client performs the fossil collection st
 required to delete on of these backups, called `\#2'.
 Should it have included re-uploading the same chunk which was turned into a fossil
 earlier the fossil collection step will turn it into a fossil should none of
-the other manifests reference it.
+the other manifests files reference it.
 Since \nameref{para:policy2} implies that there can only exist at most one fossil per chunk
 name the renaming operation will replace the existing fossil.
 
@@ -296,16 +310,17 @@ fossil but have different timestamps associated with them when checking \nameref
 Should the fossil deletion step be executed it can't distinguish between fossils created
 by its fossil collection step and fossils of the same chunks created by different fossil
 collection steps.
-This in turn can cause it to delete them even before \nameref{para:policy3} should allow the
-fossil deletion step associated with the fossil collection step that created to be executed,
-violating the assumption that the fossil will no longer be referenced by manifest files
-which are in the process of being created.
+This in turn can cause it to delete them even before \nameref{para:policy3} would allow the
+fossil deletion step associated with the fossil collection step that created them
+to be executed, violating the assumption that the fossil will no longer be referenced
+by manifest files which are in the process of being created.
 
 In the example this is exploited by a client creating a manifest file called `\#3` referencing
-the chunk which was turned into a fossil but looked up before and therefore not re-uploaded
+the chunk which was looked up before being turned into a fossil and therefore not re-uploaded
 again.
-Should this manifest file be created after the fossil deletion step downloaded all manifest
-files it will delete the fossil and therefore cause restoration of the associated backup to fail.
+Should this manifest file be created after the fossil deletion step downloaded
+all manifest files the fossil will be deleted and therefore cause the restoration
+of the associated backup to fail.
 
 \subsection{Solution}
 
@@ -316,7 +331,7 @@ of the fossil collection and deletion steps has to be constrained.
     \begin{thm}\label{thm:singleclient}
         Assuming the manifest files of backups to be deleted are removed during the
         fossil collection step.
-        By limiting fossil collection and deletion steps to a single client and the
+        By limiting the fossil collection and deletion steps to a single client and the
         number of pending fossil deletion steps to 1 fossil collection and deletion
         steps influencing each other does not disrupt the Lock-Free Deduplication algorithm.
     \end{thm}
@@ -330,9 +345,9 @@ of the fossil collection and deletion steps has to be constrained.
         referenced by a fossil deletion step and should therefore only be fossilized
         after the referencing manifest files seen by the fossil deletion step were
         either removed or are about to be deleted by the fossil collection step.
-        Since the fossil deletion step completed before the fossil collection step
-        started any remaining manifest files seen by it are also seen by the fossil
-        collection step.
+        Since the fossil deletion step has to be completed before the fossil collection
+        step can be started any remaining manifest files seen by it are also seen by the
+        fossil collection step.
 
     \item A fossil collection step creates a fossil operated on by a fossil deletion step
 
@@ -352,10 +367,10 @@ of the fossil collection and deletion steps has to be constrained.
 
         Should the fossil deletion step delete a fossil it should only do so when
         there is no manifest file still referencing it.
-        The fossil deletion step can only receive fossils from its fossil
-        collection step or one which was executed before it and can only start after
-        \nameref{para:policy3} ensures no new manifest files can reference fossils
-        created before its fossil collection step ended.
+        The fossil deletion step can only receive fossils from its associated
+        fossil collection step and only start after \nameref{para:policy3}
+        ensures no new manifest files can reference fossils created before its
+        associated fossil collection step ended.
         Since there can be at most one pending fossil deletion step the fossil
         deletion step can only operate on fossils created by its associated fossil
         collection step and therefore any manifest file still referencing the fossil
