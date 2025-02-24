@@ -1,4 +1,5 @@
 $pdf_mode = 1;
 $aux_dir = 'build';
+$use_make_for_missing_files = 1;
 push @generated_exts, 'nav', 'snm';
 set_tex_cmds( '--shell-escape %O %S' );

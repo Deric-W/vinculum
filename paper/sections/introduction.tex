@@ -1,0 +1,48 @@
+\chapter{Introduction}\label{ch:introduction}\pagenumbering{arabic}
+
+Creating backups is important.
+With the possibility of a catastrophic error such as a hardware failure happening
+at any time keeping data save is a known challenge with a possible solution
+being periodic backups.
+
+Since periodic backups often contain large amounts of data which did not change
+since the previous backup storage space is wasted by storing redundant data.
+Many existing solutions are able to remove redundant data from individual backups
+in a process called `deduplication'.
+The storage space saved by such an ability can be increased by performing
+the deduplication across the maximum number of backups possible.
+
+This in turn is limited by many current implementations placing restrictions on
+the ability to perform deduplication across backups originating from different
+sources.
+Should for example all workstation machines existing in an office be backed up
+to a central server there can be restrictions such as deduplication only being
+possible between backups of the same machine or only one machine being able to
+create a backup at a time.
+
+To prevent having to implement such restrictions while also ensuring backup
+data remains consistent Gilbert et al.\ developed an algorithm called
+`Lock-Free Deduplication'~\cite{Duplicacy}.
+Its greatest difference in comparison to existing approaches is the ability of
+all operations to be performed in parallel, even by different machines accessing
+a shared backup storage without sacrificing deduplication.
+
+While the algorithm is implemented in a program called `Duplicacy' its usefulness
+is limited by the available interfaces and licenses.
+With Duplicacy being intended for use by end users it is difficult to reuse the
+algorithm in other programs or approaches besides managing backup data.
+Reuse is further complicated by its license\footnote{\url{https://github.com/gilbertchen/duplicacy/blob/master/LICENSE.md}}
+requiring payment for commercial use for each machine running it.
+
+This thesis concerns itself with the question on how to support alternative
+implementations of the Lock-Free Deduplication algorithm.
+First, there will be an examination of existing approaches to creating backups
+and the details of the algorithm in \Cref{ch:background}.
+Next, problems with applying it to real-world conditions are identified in
+\Cref{ch:design} and solutions provided.
+After that a library called `Vinculum' which is the main result of this thesis
+will be presented in \Cref{ch:implementation}.
+Its performance will be evaluated in \Cref{ch:evaluation} by comparing it with
+a selection of similar backup solutions followed by a discussion of the results
+in \Cref{ch:discussion}.
+Finally, \Cref{ch:conclusion} concludes the thesis.

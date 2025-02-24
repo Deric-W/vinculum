@@ -38,7 +38,7 @@ jobs:
       run: cargo install cargo-tarpaulin --no-default-features
 
     - name: Build & Test (with coverage)
-      run: cargo tarpaulin --verbose --all-features --engine llvm --out xml
+      run: cargo tarpaulin --workspace --verbose --all-features --no-fail-fast --engine llvm --out xml
 
     - name: Upload coverage
       uses: codecov/codecov-action@v5
@@ -73,4 +73,4 @@ jobs:
         cargo clippy --workspace --no-deps --all-features --all-targets -- -D warnings
 
     - name: Build & Test (without coverage)
-      run: cargo test --verbose --all-features
+      run: cargo test --workspace --verbose --all-features --no-fail-fast

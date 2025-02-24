@@ -13,8 +13,8 @@ such as [Duplicacy](https://duplicacy.com) as described in their
 
 The most important object is the repository, which stores chunks, clients
 and manifests and is available to a number of clients.
-It is represented by the `Repository` trait, which has implementations
-defined in the `backends` module.
+It is represented by the `Repository` trait, which is designed to be
+implemented by you.
 
 Clients represent individual users which may perform operations on the
 repository at the same time as other clients, like creating chunks or
@@ -50,7 +50,17 @@ delete fossils or turn them back into chunks.
 It is possible to combine the deletion of a fossil collection with the
 creation of the next one using `PipelinedFossilCollectionBuilder`.
 
+## Concurrency
+
+While this crate does not depend on a particular async runtime it performs
+actions concurrently when possible, which can be controlled by the `concurrency`
+argument of some functions.
+
+This is achieved by using `futures::stream::FuturesUnordered`, which in
+turn requires that any blocking operations (for example filesystem operations
+or hashing large amounts of data) are queued on an external thread pool should
+parallel execution be desired.
+
 ## Features
 
-- `files`: enables a repository implementation utilizing the local file system.
 - `serde`: implements `serde::Serialize` and `serde::Deserialize` for `FossilCollection`.

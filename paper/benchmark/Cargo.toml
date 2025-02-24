@@ -11,17 +11,22 @@ categories = ["database-implementations"]
 edition = "2021"
 
 [dependencies]
-futures = "0.3"
+futures = { version = "0.3", features = ["std"], default-features = false }
+thiserror = "2"
 serde = {version = "1.0", features = ["derive"] }
-clap = { version = "4.5.26", features = ["derive"] }
-hex = "0.4.3"
-tokio = { version = "1", features = ["rt", "sync"] }
-tokio-stream = "0.1.16"
-vinculum = { path = "../..", features = ["files", "serde"] }
-ciborium = "0.2.2"
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+tokio = { version = "1", features = ["rt", "sync", "fs", "io-util"] }
+tokio-stream = {version = "0.1", features = ["fs"] }
+tokio-util = {version = "0.7", features = ["compat"] }
+vinculum = { path = "../..", features = ["serde"] }
+ciborium = "0.2"
 sha2 = "0.10"
+libc = "0.2"
+pin-project = "1"
+rand = { version = "0.9", features = ["thread_rng"] }
 
 [dev-dependencies]
-assert_cmd = "2.0.16"
+assert_cmd = "2"
 tokio = { version = "1", features = ["macros", "rt"] }
 tempfile = "3"

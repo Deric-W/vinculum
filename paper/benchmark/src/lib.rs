@@ -1,9 +1,11 @@
-//! ID types and functions used by tests.
+//! ID types and functionality used by tests.
 
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::path::Path;
 use vinculum::FossilCollection;
+
+pub mod repository;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import random
 from argparse import ArgumentParser, FileType, Namespace
 from collections.abc import Callable
 from contextlib import ExitStack, contextmanager
@@ -32,8 +33,9 @@ ARGS.add_argument("--borg1", type=str, default="borg", help="Borg1 executable")
 ARGS.add_argument("--borg2", type=str, default="borg", help="Borg2 executable")
 ARGS.add_argument(
     "--chunks-per-manifest",
-    action="store_true",
-    help="Treat the number of chunks as per manifest instead of per repository",
+    type=int,
+    help="Number of chunks per manifest, defaults to the total number of \
+        chunks divided by the number of manifests",
 )
 ARGS.add_argument(
     "-a",
@@ -372,19 +374,33 @@ def prune_vinculum_manifest(name: str, args: Namespace) -> tuple[int, int]:
 @contextmanager
 def create_manifests(chunks: int, manifests: int, args: Namespace) -> None:
     assert manifests > 0
+    if args.chunks_per_manifest is not None:
+        assert args.chunks_per_manifest <= chunks
     path = args.location / "dataset" / "dataset"
-    manifest_part = args.chunk_size // 2
-    chunk_part = args.chunk_size - manifest_part
-    if args.chunks_per_manifest:
-        chunks_per_manifest = chunks
-    else:
-        chunks_per_manifest = chunks // manifests
     try:
         for manifest in range(manifests):
             with open(path, "wb") as dataset:
-                for chunk in range(chunks_per_manifest):
-                    dataset.write(manifest.to_bytes(manifest_part, "big", signed=False))
-                    dataset.write(chunk.to_bytes(chunk_part, "big", signed=False))
+                if args.chunks_per_manifest is None:
+                    print(
+                        f"Generating '{path}' with {chunks // manifests} chunks...",
+                        file=sys.stderr,
+                    )
+                    manifest_part = args.chunk_size // 2
+                    chunk_part = args.chunk_size - manifest_part
+                    for chunk in range(chunks // manifests):
+                        dataset.write(
+                            manifest.to_bytes(manifest_part, "big", signed=False)
+                        )
+                        dataset.write(chunk.to_bytes(chunk_part, "big", signed=False))
+                else:
+                    print(
+                        f"Generating '{path}' with {args.chunks_per_manifest} random chunks...",
+                        file=sys.stderr,
+                    )
+                    for chunk in random.sample(range(chunks), args.chunks_per_manifest):
+                        dataset.write(
+                            chunk.to_bytes(args.chunk_size, "big", signed=False)
+                        )
             processes = []
             try:
                 processes.append(create_borg1_manifest(f"manifest_{manifest}", args))
