@@ -24,3 +24,6 @@ Cargo.lock
 paper/build
 paper/*.pdf
 paper/*-textidote.html
+
+# large binary blobs
+paper/benchmark/datasets/*
