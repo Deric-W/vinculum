@@ -140,7 +140,7 @@ impl<M, I, C> FileRepository<M, I, C> {
         for<'a> &'a X: Into<OsString>,
     {
         let string = id.into();
-        if string.len() == 0 {
+        if string.is_empty() {
             Err(IoError::other("received id with length zero"))
         } else {
             let mut buf = self.directory().to_path_buf();
@@ -198,7 +198,7 @@ where
     pub async fn chunk(&self, id: &C) -> IoResult<impl AsyncRead> {
         let mut buf = self.directory().to_owned();
         let file_name = id.into();
-        if file_name.len() == 0 {
+        if file_name.is_empty() {
             return Err(IoError::other("received id with length zero"));
         }
         // retry a second time in case the chunks was fossilized and recovered
@@ -351,7 +351,7 @@ where
         chunk: &<Self::Manifest as vinculum::Manifest>::ChunkID,
     ) -> Result<(), Self::Error> {
         let file_name = chunk.into();
-        if file_name.len() == 0 {
+        if file_name.is_empty() {
             return Err(IoError::other("received id with length zero"));
         }
         let mut from = self.directory().to_owned();
@@ -372,7 +372,7 @@ where
         fossil: &<Self::Manifest as vinculum::Manifest>::ChunkID,
     ) -> Result<(), Self::Error> {
         let file_name = fossil.into();
-        if file_name.len() == 0 {
+        if file_name.is_empty() {
             return Err(IoError::other("received id with length zero"));
         }
         let mut from = self.directory().to_owned();
