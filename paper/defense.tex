@@ -116,11 +116,11 @@
             \item \textit{Repository and Manifest} traits: describe operations
                 used by the Lock-Free Deduplication algorithm
             \item \textit{FossilCollection} struct: stores data required by the
-                fossil deletion step and provides method to perform it
+                fossil deletion step and provides methods to perform it
             \item \textit{FossilCollectionBuilder} struct: provides methods to perform
                 the fossil collection step
             \item \textit{PipelinedFossilCollectionBuilder} struct: allows reuse data
-                aquired during a fossil deletion step for a fossil collection step
+                acquired during a fossil deletion step for a fossil collection step
         \end{itemize}
     \end{frame}
 
@@ -158,10 +158,10 @@
     \begin{frame}
         \frametitle{Setup}
         \begin{itemize}
-            \item a simple repository was implemented ontop a UNIX file system
+            \item a simple repository was implemented on top a UNIX file system
                 together with a command line application
-            \item three existing backup programs with a similar internal architekture
-                where selected for comparison 
+            \item three existing backup programs with a similar internal architecture
+                were selected for comparison 
             \item the evaluation was performed on a machine running Linux 6.12
                 with the ext4 file system located on a hard disk
         \end{itemize}
@@ -181,14 +181,14 @@
     \begin{frame}
         \frametitle{VM Images: Setup}
         \begin{itemize}
-            \item three VM images where backed up with a fixed chunk size of 1 MiB
+            \item three VM images were backed up with a fixed chunk size of 1 MiB
             \begin{enumerate}
                 \item after completing the setup
                 \item after installing common developer tools
                 \item after a power on immediately followed by a power off
             \end{enumerate}
-            \item they where deleted in FIFO order
-            \item all programs performed the deletion with two operations which where measured independently
+            \item they were deleted in FIFO order
+            \item all programs performed the deletion with two operations which were measured independently
         \end{itemize}
     \end{frame}
 
@@ -283,7 +283,7 @@
         \begin{itemize}
             \item a specific number of chunks is divided between four backups
             \item one backup is deleted afterwards
-            \item the sum of the times required by the two operations required for deletion was measured
+            \item the sum of the times required by the two operations required for deletion is displayed
         \end{itemize}
     \end{frame}
 
@@ -319,10 +319,10 @@
     \begin{frame}
         \frametitle{Backups Scaling: Setup}
         \begin{itemize}
-            \item a fixed number of chunks with a size of 4096 bytes where created
+            \item a fixed number of chunks with a size of 4096 bytes were created
             \item they are divided between a specific number of backups
             \item one of the backups is deleted afterwards
-            \item the sum of the times required by the two operations required for deletion was measured
+            \item the sum of the times required by the two operations required for deletion is displayed
         \end{itemize}
     \end{frame}
 
