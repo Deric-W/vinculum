@@ -1,8 +1,6 @@
 \documentclass[english,utf8,aspectratio=169]{beamer}
 \usetheme{tud}
 \usecolortheme{tud}
-\usepackage[backend = biber,style = numeric]{biblatex}
-\addbibresource{bibliography.bib}
 \usepackage[inkscapepath={./build/svg-inkscape}]{svg}
 \svgpath{{./figures/}}
 \usepackage{hyperref}
@@ -59,15 +57,8 @@
     \section{Background}
     \begin{frame}
         \frametitle{Terminology}
-        \begin{itemize}
-            \item Client: Machine creating backups
-            \item Repository: Storage for backups which is shared by multiple clients
-            \item Chunk: Part of a backup stored in the repository
-            \item Manifest: Metadata associated with a specific backup which references chunks
-        \end{itemize}
-
         \begin{center}
-            \includesvg[height=.5\textheight, pretex=\small]{terminology.drawio.svg}
+            \includesvg[width=.9\textwidth, height=.9\textheight, pretex=\small]{terminology.drawio.svg}
         \end{center}
     \end{frame}
     
@@ -86,8 +77,12 @@
 
     \begin{frame}
         \frametitle{Example}
+        \begin{itemize}
+            \item the dyed chunks are unreferenced and are therefore pruned
+            \item the red chunk is referenced by a manifest in the process of being created
+        \end{itemize}
         \begin{center}
-            \includesvg[height=.7\textheight, pretex=\small]{lock-free_deduplication_example.drawio.svg}
+            \includesvg[height=.6\textheight, pretex=\small]{lock-free_deduplication_example.drawio.svg}
         \end{center}
     \end{frame}
 
