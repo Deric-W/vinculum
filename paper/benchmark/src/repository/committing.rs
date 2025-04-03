@@ -81,7 +81,7 @@ where
 {
     match tokio::task::spawn_blocking(f).await {
         Ok(res) => Ok(res),
-        Err(_) => Err(IoError::new(ErrorKind::Other, "tokio task failed")),
+        Err(_) => Err(IoError::other("tokio task failed")),
     }
 }
 
@@ -244,10 +244,9 @@ where
             CommitOnCloseStateProj::Writing(Some((writer, _, _))) => {
                 pin!(writer).poll_write(cx, buf)
             }
-            CommitOnCloseStateProj::Commiting(_) => Poll::Ready(Err(IoError::new(
-                ErrorKind::Other,
-                "writer is being closed",
-            ))),
+            CommitOnCloseStateProj::Commiting(_) => {
+                Poll::Ready(Err(IoError::other("writer is being closed")))
+            }
             _ => unreachable!(),
         }
     }
@@ -261,10 +260,9 @@ where
             CommitOnCloseStateProj::Writing(Some((writer, _, _))) => {
                 pin!(writer).poll_write_vectored(cx, bufs)
             }
-            CommitOnCloseStateProj::Commiting(_) => Poll::Ready(Err(IoError::new(
-                ErrorKind::Other,
-                "writer is being closed",
-            ))),
+            CommitOnCloseStateProj::Commiting(_) => {
+                Poll::Ready(Err(IoError::other("writer is being closed")))
+            }
             _ => unreachable!(),
         }
     }
@@ -272,10 +270,9 @@ where
     fn poll_flush(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<IoResult<()>> {
         match self.project().state.project() {
             CommitOnCloseStateProj::Writing(Some((writer, _, _))) => pin!(writer).poll_flush(cx),
-            CommitOnCloseStateProj::Commiting(_) => Poll::Ready(Err(IoError::new(
-                ErrorKind::Other,
-                "writer is being closed",
-            ))),
+            CommitOnCloseStateProj::Commiting(_) => {
+                Poll::Ready(Err(IoError::other("writer is being closed")))
+            }
             _ => unreachable!(),
         }
     }
