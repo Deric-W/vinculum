@@ -76,7 +76,7 @@ pub struct BuilderSeenManifests<'a, M> {
 }
 
 impl<M> BuilderSeenManifests<'_, M> {
-    fn new(inner: std::collections::hash_set::Iter<M>) -> BuilderSeenManifests<'_, M> {
+    fn new(inner: std::collections::hash_set::Iter<'_, M>) -> BuilderSeenManifests<'_, M> {
         BuilderSeenManifests { inner }
     }
 }
@@ -159,7 +159,7 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     }
 
     /// The chunks marked as fossil candidates.
-    pub fn iter_fossil_candidates(&self) -> FossilCandidates<C> {
+    pub fn iter_fossil_candidates(&self) -> FossilCandidates<'_, C> {
         FossilCandidates::new(self.fossil_candidates.iter())
     }
 
@@ -169,7 +169,7 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     }
 
     /// Iterate through the currently referenced chunks.
-    pub fn iter_referenced_chunks(&self) -> ReferencedChunks<C> {
+    pub fn iter_referenced_chunks(&self) -> ReferencedChunks<'_, C> {
         ReferencedChunks::new(self.referenced_chunks.iter())
     }
 
@@ -179,7 +179,7 @@ impl<M, C> FossilCollectionBuilder<M, C> {
     }
 
     /// The manifests seen by this builder.
-    pub fn iter_seen_manifests(&self) -> BuilderSeenManifests<M> {
+    pub fn iter_seen_manifests(&self) -> BuilderSeenManifests<'_, M> {
         BuilderSeenManifests::new(self.seen_manifests.iter())
     }
 

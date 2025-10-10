@@ -163,7 +163,7 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
     }
 
     /// Iterate through the chunks currently marked as fossil candidates.
-    pub fn iter_fossil_candidates(&self) -> FossilCandidates<C> {
+    pub fn iter_fossil_candidates(&self) -> FossilCandidates<'_, C> {
         self.builder.iter_fossil_candidates()
     }
 
@@ -173,7 +173,7 @@ impl<'a, M, I, C> PipelinedFossilCollectionBuilder<'a, M, I, C> {
     }
 
     /// Iterate through the currently referenced chunks.
-    pub fn iter_referenced_chunks(&self) -> ReferencedChunks<C> {
+    pub fn iter_referenced_chunks(&self) -> ReferencedChunks<'_, C> {
         self.builder.iter_referenced_chunks()
     }
 }
@@ -184,7 +184,7 @@ where
 {
     /// Iterate through all manifests which where seen by either this builder
     /// or its associated fossil collection.
-    pub fn iter_seen_manifests(&self) -> PipelinedSeenManifests<M> {
+    pub fn iter_seen_manifests(&self) -> PipelinedSeenManifests<'_, M> {
         let seen_manifests = NotInSet::new(
             self.builder.iter_seen_manifests(),
             self.expiring_manifests.iter(),

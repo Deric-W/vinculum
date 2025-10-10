@@ -481,7 +481,7 @@ pub struct CollectionSeenManifests<'a, M> {
 }
 
 impl<M> CollectionSeenManifests<'_, M> {
-    fn new(inner: std::collections::hash_set::Iter<M>) -> CollectionSeenManifests<'_, M> {
+    fn new(inner: std::collections::hash_set::Iter<'_, M>) -> CollectionSeenManifests<'_, M> {
         CollectionSeenManifests { inner }
     }
 }
@@ -577,7 +577,7 @@ impl<M, C> FossilCollection<M, C> {
     }
 
     /// The fossils in this collection, without duplicates.
-    pub fn iter_fossils(&self) -> Fossils<C> {
+    pub fn iter_fossils(&self) -> Fossils<'_, C> {
         Fossils::new(self.fossils.iter())
     }
 
@@ -590,7 +590,7 @@ impl<M, C> FossilCollection<M, C> {
     ///
     /// They are used to limit the number of manifests which need
     /// to be checked on deletion, see [`FossilCollection::has_seen_manifest`].
-    pub fn iter_seen_manifests(&self) -> CollectionSeenManifests<M> {
+    pub fn iter_seen_manifests(&self) -> CollectionSeenManifests<'_, M> {
         CollectionSeenManifests::new(self.seen_manifests.iter())
     }
 
