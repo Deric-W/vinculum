@@ -24,7 +24,7 @@ ciborium = "0.2"
 sha2 = "0.10"
 libc = "0.2"
 pin-project = "1"
-rand = { version = "0.9", features = ["thread_rng"] }
+rand = { version = "0.10", features = ["thread_rng"] }
 
 [dev-dependencies]
 assert_cmd = "2"
